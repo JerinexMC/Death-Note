@@ -1,0 +1,18 @@
+name: DeathNote
+version: 1.0.0
+main: com.deathnote.DeathNotePlugin
+api-version: '1.21'
+authors: [OpenAI]
+description: A customizable Death Note with temporary protected execution arenas.
+softdepend: [PvpBot]
+commands:
+  deathnote:
+    description: DeathNote administration
+    usage: /deathnote <give|execute|methods|reload|cancel>
+    aliases: [dn]
+    permission: deathnote.admin
+permissions:
+  deathnote.admin:
+    default: op
+  deathnote.use:
+    default: true

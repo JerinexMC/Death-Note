@@ -1,0 +1,26 @@
+# DeathNote settings
+deathbot:
+  enabled: true
+  name: Death
+  kit: long
+  # PvpBot command templates. {name} and {victim} are replaced by the plugin.
+  spawn-command: "pvpbot spawn {name}"
+  teleport-command: "pvpbot tp {name} {victim}"
+  kit-command: "pvpbot kit give {kit} {name}"
+  remove-command: "pvpbot remove {name}"
+arena:
+  enabled: true
+  radius: 30
+  # A hollow black-concrete hemisphere with a solid circular floor.
+  material: BLACK_CONCRETE
+  protect-players: true
+  spectator-radius: 36
+  restore-delay-ticks: 40
+  # Maximum number of blocks the plugin will modify for one arena.
+  max-blocks: 12000
+execution:
+  countdown-seconds: 3
+  broadcast: true
+  require-online-target: true
+  allow-self-target: false
+  cooldown-seconds: 30
