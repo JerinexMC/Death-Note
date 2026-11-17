@@ -2,96 +2,125 @@
 package com.deathnote;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
-import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.enchantments.Enchantment;
-import org.bukkit.entity.*;
+import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.BookMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
-import org.bukkit.util.Vector;
 
 import java.util.*;
 
-public final class DeathNotePlugin extends JavaPlugin
-        implements Listener, CommandExecutor {
+public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin implements Listener {
 
     private NamespacedKey bookKey;
 
-    private final Map<UUID, String> waitingForVictim = new HashMap<>();
-    private final Map<UUID, Long> cooldowns = new HashMap<>();
-    private final Map<UUID, BukkitTask> scheduledDeaths = new HashMap<>();
+    private final Map<UUID, DeathMethod> awaitingVictim = new HashMap<>();
+    private final Map<UUID, Arena> arenas = new HashMap<>();
+    private final Set<BlockKey> protectedBlocks = new HashSet<>();
     private final Map<UUID, List<String>> history = new HashMap<>();
 
-    private static final String GUI_TITLE = "§0§lDEATH NOTE";
-    private static final String BOOK_NAME = "§0§lDeath Note";
-
     private enum DeathMethod {
-        RANDOM("Random Death", Material.NETHER_STAR),
-        LIGHTNING("Lightning Strike", Material.LIGHTNING_ROD),
-        FALL("Extreme Fall", Material.FEATHER),
-        DROWN("Drowning", Material.WATER_BUCKET),
-        SUFFOCATE("Wall Suffocation", Material.STONE),
-        LAVA("Lava Execution", Material.LAVA_BUCKET),
-        STARVE("Starvation", Material.ROTTEN_FLESH),
-        FREEZE("Freezing", Material.POWDER_SNOW_BUCKET),
-        VOID("Void Execution", Material.ENDER_PEARL),
-        CACTUS("Cactus Impalement", Material.CACTUS),
-        ANVIL("Falling Anvil", Material.ANVIL),
-        HEART("Heart Attack", Material.REDSTONE),
-        CREEPER("Creeper Ambush", Material.CREEPER_HEAD),
-        POISON("Deadly Poison", Material.SPIDER_EYE),
-        ELYTRA("Elytra Crash", Material.ELYTRA),
-        TRIDENT("Trident Strike", Material.TRIDENT),
-        PHANTOM("Phantom Swarm", Material.PHANTOM_MEMBRANE),
-        WARDEN("Warden Sonic Boom", Material.SCULK_SHRIEKER),
-        TNT_MINECART("TNT Minecart", Material.TNT_MINECART),
-        CRYSTAL("End Crystal", Material.END_CRYSTAL),
-        RIPTIDE("Riptide Execution", Material.TRIDENT),
-        FIRESTORM("Firestorm", Material.BLAZE_POWDER),
-        ENDERMAN("Enderman Execution", Material.ENDER_PEARL),
-        RAVAGER("Ravager Charge", Material.RAVAGER_SPAWN_EGG),
-        GOLEM("Iron Golem Attack", Material.IRON_BLOCK),
-        WITHER("Wither Execution", Material.WITHER_SKELETON_SKULL),
-        GHAST("Ghast Fireball", Material.GHAST_TEAR),
-        VEX("Vex Swarm", Material.IRON_SWORD),
-        SILVERFISH("Silverfish Infestation", Material.INFESTED_STONE),
-        METEOR("Meteor Strike", Material.FIRE_CHARGE),
-        EARTHQUAKE("Earthquake", Material.DEEPSLATE),
-        BLACK_HOLE("Black Hole", Material.DRAGON_EGG),
-        SOUL_DRAIN("Soul Drain", Material.SOUL_SAND),
-        DIVINE("Divine Smite", Material.NETHER_STAR),
-        BLOOD_MOON("Blood Moon Curse", Material.REDSTONE_BLOCK),
-        RANDOM_TRAP("Random Teleport Trap", Material.COBWEB),
-        SOUL_FIRE("Soul Fire Execution", Material.SOUL_FIRE),
-        BLINDNESS("Cursed Blindness", Material.BLACK_DYE),
-        DEATHBOT("DeathBot", Material.NETHERITE_SWORD);
+        RANDOM,
+        LIGHTNING,
+        FALL,
+        DROWN,
+        SUFFOCATE,
+        LAVA,
+        STARVE,
+        FREEZE,
+        VOID,
+        CACTUS,
+        ANVIL,
+        HEART,
+        CREEPER,
+        POISON,
+        ELYTRA,
+        TRIDENT,
+        PHANTOM,
+        WARDEN,
+        TNT_MINECART,
+        CRYSTAL,
+        RIPTIDE,
+        FIRESTORM,
+        ENDERMAN,
+        RAVAGER,
+        GOLEM,
+        WITHER,
+        GHAST,
+        VEX,
+        SILVERFISH,
+        METEOR,
+        EARTHQUAKE,
+        BLACK_HOLE,
+        SOUL_DRAIN,
+        DIVINE,
+        BLOOD_MOON,
+        RANDOM_TRAP,
+        SOUL_FIRE,
+        BLINDNESS,
+        DEATHBOT
+    }
 
-        final String display;
-        final Material icon;
+    private static final int METHODS_PER_PAGE = 36;
 
-        DeathMethod(String display, Material icon) {
-            this.display = display;
-            this.icon = icon;
+    private static class DeathMenu implements InventoryHolder {
+        private final int page;
+        private Inventory inventory;
+
+        DeathMenu(int page) {
+            this.page = page;
+        }
+
+        @Override
+        public Inventory getInventory() {
+            return inventory;
+        }
+    }
+
+    private record BlockKey(UUID world, int x, int y, int z) {
+        static BlockKey of(Block block) {
+            return new BlockKey(
+                    block.getWorld().getUID(),
+                    block.getX(),
+                    block.getY(),
+                    block.getZ()
+            );
+        }
+    }
+
+    private static class Arena {
+        final UUID victim;
+        final Map<BlockKey, BlockState> originalBlocks = new LinkedHashMap<>();
+        BukkitTask timeout;
+
+        Arena(UUID victim) {
+            this.victim = victim;
         }
     }
 
@@ -99,62 +128,29 @@ public final class DeathNotePlugin extends JavaPlugin
     public void onEnable() {
         bookKey = new NamespacedKey(this, "death_note");
 
-        getConfig().addDefault("cooldown-seconds", 30);
-        getConfig().addDefault("death-delay-seconds", 2);
-        getConfig().addDefault("deathbot.enabled", true);
-        getConfig().addDefault(
-                "deathbot.spawn-command",
-                "pvpbot spawn Death %player%"
-        );
-        getConfig().addDefault(
-                "deathbot.kit-command",
-                "pvpbot kit give long Death"
-        );
-        getConfig().options().copyDefaults(true);
-        saveConfig();
+        Bukkit.getPluginManager().registerEvents(this, this);
 
-        if (getCommand("deathnote") != null) {
-            getCommand("deathnote").setExecutor(this);
-        } else {
-            getLogger().severe("Missing deathnote command in plugin.yml!");
-        }
-
-        getServer().getPluginManager().registerEvents(this, this);
-        getLogger().info("DeathNote enabled!");
+        getLogger().info("DeathNote enabled.");
     }
 
     @Override
     public void onDisable() {
-        for (BukkitTask task : scheduledDeaths.values()) {
-            task.cancel();
+        for (Arena arena : new ArrayList<>(arenas.values())) {
+            restoreArena(arena);
         }
-        scheduledDeaths.clear();
+
+        getLogger().info("DeathNote disabled.");
     }
 
-    // =====================================================
+    // --------------------------------------------------
     // DEATH NOTE ITEM
-    // =====================================================
+    // --------------------------------------------------
 
-    private ItemStack createBook() {
-        ItemStack book = new ItemStack(Material.WRITTEN_BOOK);
-        BookMeta meta = (BookMeta) book.getItemMeta();
+    private ItemStack createDeathNote() {
+        ItemStack item = new ItemStack(Material.WRITTEN_BOOK);
+        ItemMeta meta = item.getItemMeta();
 
-        if (meta == null) {
-            return book;
-        }
-
-        meta.setTitle("Death Note");
-        meta.setAuthor("Ryuk");
-        meta.setDisplayName(BOOK_NAME);
-        meta.setLore(Arrays.asList(
-                "§8A notebook of death.",
-                "§7Write a person's name.",
-                "§7Choose how their story ends.",
-                "",
-                "§cRight-click to open."
-        ));
-
-        meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+        meta.setDisplayName(ChatColor.DARK_RED + "Death Note");
 
         meta.getPersistentDataContainer().set(
                 bookKey,
@@ -162,35 +158,41 @@ public final class DeathNotePlugin extends JavaPlugin
                 (byte) 1
         );
 
-        meta.setPages(
-                "§0DEATH NOTE\n\n" +
-                "§8Write the name of the person whose fate you wish to decide.\n\n" +
-                "§7Their story ends when their name is written."
-        );
+        if (meta instanceof org.bukkit.inventory.meta.BookMeta bookMeta) {
+            bookMeta.setTitle("Death Note");
+            bookMeta.setAuthor("Death");
+            bookMeta.setPages(
+                    ChatColor.DARK_RED + "DEATH NOTE\n\n" +
+                    ChatColor.BLACK + "Write the name of the person you wish to eliminate.\n\n" +
+                    "Right-click to open the death menu."
+            );
+        }
 
-        book.setItemMeta(meta);
-        return book;
+        item.setItemMeta(meta);
+        return item;
     }
 
     private boolean isDeathNote(ItemStack item) {
-        if (item == null || item.getType() != Material.WRITTEN_BOOK) {
+        if (item == null || !item.hasItemMeta()) {
             return false;
         }
 
-        if (!(item.getItemMeta() instanceof BookMeta meta)) {
-            return false;
-        }
+        Byte value = item.getItemMeta()
+                .getPersistentDataContainer()
+                .get(bookKey, PersistentDataType.BYTE);
 
-        return meta.getPersistentDataContainer().has(
-                bookKey,
-                PersistentDataType.BYTE
-        );
+        return value != null && value == (byte) 1;
     }
 
     @EventHandler
-    public void onBookUse(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_AIR
-                && event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+    public void onRightClick(PlayerInteractEvent event) {
+        if (event.getHand() == null ||
+                event.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) {
+            return;
+        }
+
+        if (event.getAction() != Action.RIGHT_CLICK_AIR &&
+                event.getAction() != Action.RIGHT_CLICK_BLOCK) {
             return;
         }
 
@@ -199,91 +201,117 @@ public final class DeathNotePlugin extends JavaPlugin
         }
 
         event.setCancelled(true);
-        openMenu(event.getPlayer());
+        event.getPlayer().openInventory(createMenu(0));
     }
 
-    // =====================================================
+    // --------------------------------------------------
     // GUI
-    // =====================================================
+    // --------------------------------------------------
 
-    private void openMenu(Player player) {
-        Inventory inventory = Bukkit.createInventory(null, 54, GUI_TITLE);
+    private Inventory createMenu(int page) {
+        DeathMenu holder = new DeathMenu(page);
 
-        ItemStack filler = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
-        ItemMeta fillerMeta = filler.getItemMeta();
-
-        if (fillerMeta != null) {
-            fillerMeta.setDisplayName("§0");
-            filler.setItemMeta(fillerMeta);
-        }
-
-        for (int i = 0; i < 54; i++) {
-            inventory.setItem(i, filler);
-        }
-
-        addGuiItem(
-                inventory,
-                4,
-                Material.NETHER_STAR,
-                "§c§lRANDOM DEATH",
-                "§7Choose a random execution method."
+        Inventory inventory = Bukkit.createInventory(
+                holder,
+                54,
+                ChatColor.DARK_RED + "Death Note"
         );
 
-        int slot = 9;
+        holder.inventory = inventory;
 
-        for (DeathMethod method : DeathMethod.values()) {
-            if (method == DeathMethod.RANDOM) {
-                continue;
-            }
+        List<DeathMethod> methods = Arrays.asList(DeathMethod.values());
 
-            if (slot >= 45) {
-                break;
-            }
+        int start = page * METHODS_PER_PAGE;
+        int end = Math.min(start + METHODS_PER_PAGE, methods.size());
 
-            addGuiItem(
-                    inventory,
-                    slot,
-                    method.icon,
-                    "§c" + method.display,
-                    "§7Click to select this method."
-            );
+        for (int i = start; i < end; i++) {
+            DeathMethod method = methods.get(i);
+            int slot = 9 + (i - start);
 
-            slot++;
+            Material icon = getMethodIcon(method);
+
+            ItemStack item = new ItemStack(icon);
+            ItemMeta meta = item.getItemMeta();
+
+            meta.setDisplayName(ChatColor.RED + formatMethod(method));
+            meta.setLore(List.of(
+                    ChatColor.GRAY + "Click to select this death method",
+                    ChatColor.DARK_GRAY + "Page " + (page + 1)
+            ));
+
+            item.setItemMeta(meta);
+            inventory.setItem(slot, item);
         }
 
-        addGuiItem(
-                inventory,
-                49,
-                Material.BARRIER,
-                "§cClose",
-                "§7Close the Death Note."
-        );
+        if (page > 0) {
+            ItemStack previous = new ItemStack(Material.ARROW);
+            ItemMeta meta = previous.getItemMeta();
+            meta.setDisplayName(ChatColor.YELLOW + "Previous page");
+            previous.setItemMeta(meta);
+            inventory.setItem(45, previous);
+        }
 
-        player.openInventory(inventory);
+        if (end < methods.size()) {
+            ItemStack next = new ItemStack(Material.ARROW);
+            ItemMeta meta = next.getItemMeta();
+            meta.setDisplayName(ChatColor.YELLOW + "Next page");
+            next.setItemMeta(meta);
+            inventory.setItem(53, next);
+        }
+
+        ItemStack info = new ItemStack(Material.BOOK);
+        ItemMeta infoMeta = info.getItemMeta();
+        infoMeta.setDisplayName(ChatColor.GOLD + "Death Note");
+        infoMeta.setLore(List.of(
+                ChatColor.GRAY + "Choose a death method.",
+                ChatColor.GRAY + "Then type the victim's username in chat."
+        ));
+        info.setItemMeta(infoMeta);
+        inventory.setItem(4, info);
+
+        return inventory;
     }
 
-    private void addGuiItem(
-            Inventory inventory,
-            int slot,
-            Material material,
-            String name,
-            String lore
-    ) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
+    private Material getMethodIcon(DeathMethod method) {
+        return switch (method) {
+            case RANDOM -> Material.NETHER_STAR;
+            case LIGHTNING, DIVINE -> Material.LIGHTNING_ROD;
+            case FALL, METEOR, ANVIL, RANDOM_TRAP -> Material.ANVIL;
+            case DROWN -> Material.WATER_BUCKET;
+            case SUFFOCATE -> Material.STONE;
+            case LAVA, FIRESTORM, SOUL_FIRE -> Material.LAVA_BUCKET;
+            case STARVE -> Material.ROTTEN_FLESH;
+            case FREEZE -> Material.POWDER_SNOW_BUCKET;
+            case VOID, BLACK_HOLE -> Material.ENDER_PEARL;
+            case CACTUS -> Material.CACTUS;
+            case HEART, BLOOD_MOON -> Material.REDSTONE;
+            case CREEPER -> Material.CREEPER_HEAD;
+            case POISON -> Material.SPIDER_EYE;
+            case ELYTRA -> Material.ELYTRA;
+            case TRIDENT, RIPTIDE -> Material.TRIDENT;
+            case PHANTOM -> Material.PHANTOM_MEMBRANE;
+            case WARDEN, SOUL_DRAIN -> Material.SCULK;
+            case TNT_MINECART -> Material.TNT_MINECART;
+            case CRYSTAL -> Material.END_CRYSTAL;
+            case ENDERMAN -> Material.ENDER_PEARL;
+            case RAVAGER -> Material.RAVAGER_SPAWN_EGG;
+            case GOLEM -> Material.IRON_BLOCK;
+            case WITHER -> Material.WITHER_SKELETON_SKULL;
+            case GHAST -> Material.GHAST_TEAR;
+            case VEX -> Material.ALLAY_SPAWN_EGG;
+            case SILVERFISH -> Material.INFESTED_STONE;
+            case EARTHQUAKE -> Material.DEEPSLATE;
+            case BLINDNESS -> Material.BLACK_DYE;
+        };
+    }
 
-        if (meta != null) {
-            meta.setDisplayName(name);
-            meta.setLore(Collections.singletonList(lore));
-            item.setItemMeta(meta);
-        }
-
-        inventory.setItem(slot, item);
+    private String formatMethod(DeathMethod method) {
+        return method.name().replace('_', ' ');
     }
 
     @EventHandler
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (!event.getView().getTitle().equals(GUI_TITLE)) {
+    public void onMenuClick(InventoryClickEvent event) {
+        if (!(event.getInventory().getHolder() instanceof DeathMenu menu)) {
             return;
         }
 
@@ -299,405 +327,347 @@ public final class DeathNotePlugin extends JavaPlugin
             return;
         }
 
-        if (slot == 49) {
-            player.closeInventory();
+        if (slot == 45 && menu.page > 0) {
+            player.openInventory(createMenu(menu.page - 1));
             return;
         }
 
-        if (slot == 4) {
-            selectMethod(player, DeathMethod.RANDOM);
-            return;
-        }
+        if (slot == 53) {
+            int maxPage = (DeathMethod.values().length - 1) / METHODS_PER_PAGE;
 
-        List<DeathMethod> selectable = new ArrayList<>();
-
-        for (DeathMethod method : DeathMethod.values()) {
-            if (method != DeathMethod.RANDOM) {
-                selectable.add(method);
+            if (menu.page < maxPage) {
+                player.openInventory(createMenu(menu.page + 1));
             }
-        }
-
-        int methodIndex = slot - 9;
-
-        if (methodIndex < 0 || methodIndex >= selectable.size()) {
             return;
         }
 
-        selectMethod(player, selectable.get(methodIndex));
-    }
+        if (slot < 9 || slot > 44) {
+            return;
+        }
 
-    private void selectMethod(Player player, DeathMethod method) {
-        waitingForVictim.put(player.getUniqueId(), method.name());
+        int index = menu.page * METHODS_PER_PAGE + (slot - 9);
+
+        if (index >= DeathMethod.values().length) {
+            return;
+        }
+
+        DeathMethod method = DeathMethod.values()[index];
+
+        awaitingVictim.put(player.getUniqueId(), method);
+
         player.closeInventory();
 
-        player.sendMessage("§8§m--------------------------------");
-        player.sendMessage("§c§lDEATH NOTE");
-        player.sendMessage("§7Selected: §c" + method.display);
-        player.sendMessage("§7Type the victim's exact Minecraft username in chat.");
-        player.sendMessage("§7Type §ccancel §7to cancel.");
-        player.sendMessage("§8§m--------------------------------");
+        player.sendMessage(ChatColor.DARK_RED + "Death Note > " +
+                ChatColor.WHITE + "Selected: " +
+                ChatColor.RED + formatMethod(method));
+
+        player.sendMessage(ChatColor.GRAY +
+                "Type the victim's exact username in chat.");
     }
+
+    // --------------------------------------------------
+    // CHAT INPUT
+    // --------------------------------------------------
 
     @EventHandler
     public void onChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
-        UUID uuid = player.getUniqueId();
 
-        if (!waitingForVictim.containsKey(uuid)) {
+        DeathMethod method = awaitingVictim.get(player.getUniqueId());
+
+        if (method == null) {
             return;
         }
+
+        String victimName = event.getMessage().trim();
 
         event.setCancelled(true);
 
-        String victimName = event.getMessage().trim();
-        String methodName = waitingForVictim.remove(uuid);
-
         Bukkit.getScheduler().runTask(this, () -> {
-            if (victimName.equalsIgnoreCase("cancel")) {
-                player.sendMessage("§cDeath Note execution cancelled.");
+            if (!awaitingVictim.containsKey(player.getUniqueId())) {
                 return;
             }
 
-            DeathMethod method;
+            awaitingVictim.remove(player.getUniqueId());
 
-            try {
-                method = DeathMethod.valueOf(methodName);
-            } catch (IllegalArgumentException exception) {
-                player.sendMessage("§cInvalid death method.");
+            Player victim = Bukkit.getPlayerExact(victimName);
+
+            if (victim == null) {
+                player.sendMessage(ChatColor.RED +
+                        "That player is not online.");
                 return;
             }
 
-            executeDeath(player, victimName, method);
+            if (victim.equals(player)) {
+                player.sendMessage(ChatColor.RED +
+                        "You cannot use the Death Note on yourself.");
+                return;
+            }
+
+            executeDeath(player, victim, method);
         });
     }
 
-    // =====================================================
-    // COMMANDS
-    // =====================================================
+    // --------------------------------------------------
+    // EXECUTION
+    // --------------------------------------------------
 
-    @Override
-    public boolean onCommand(
-            CommandSender sender,
-            Command command,
-            String label,
-            String[] args
-    ) {
-        if (args.length == 0 || args[0].equalsIgnoreCase("help")) {
-            sender.sendMessage("§8§m--------------------------------");
-            sender.sendMessage("§c§lDEATH NOTE COMMANDS");
-            sender.sendMessage("§7/deathnote give <player>");
-            sender.sendMessage("§7/deathnote execute <victim>");
-            sender.sendMessage("§7/deathnote methods");
-            sender.sendMessage("§7/deathnote history <player>");
-            sender.sendMessage("§7/deathnote cancel <victim>");
-            sender.sendMessage("§7/deathnote reload");
-            sender.sendMessage("§8§m--------------------------------");
-            return true;
-        }
-
-        if (args[0].equalsIgnoreCase("give")) {
-            if (args.length < 2) {
-                sender.sendMessage("§c/deathnote give <player>");
-                return true;
-            }
-
-            Player target = Bukkit.getPlayerExact(args[1]);
-
-            if (target == null) {
-                sender.sendMessage("§cPlayer not found.");
-                return true;
-            }
-
-            Map<Integer, ItemStack> leftovers =
-                    target.getInventory().addItem(createBook());
-
-            leftovers.values().forEach(item ->
-                    target.getWorld().dropItemNaturally(
-                            target.getLocation(),
-                            item
-                    )
-            );
-
-            sender.sendMessage(
-                    "§aDeath Note given to " + target.getName() + "."
-            );
-            return true;
-        }
-
-        if (args[0].equalsIgnoreCase("execute")) {
-            if (args.length < 2) {
-                sender.sendMessage("§c/deathnote execute <victim>");
-                return true;
-            }
-
-            if (!(sender instanceof Player player)) {
-                sender.sendMessage("§cOnly players can use this command.");
-                return true;
-            }
-
-            executeDeath(player, args[1], DeathMethod.RANDOM);
-            return true;
-        }
-
-        if (args[0].equalsIgnoreCase("methods")) {
-            sender.sendMessage("§c§lDEATH NOTE METHODS:");
-
-            for (DeathMethod method : DeathMethod.values()) {
-                sender.sendMessage("§7- §c" + method.display);
-            }
-
-            return true;
-        }
-
-        if (args[0].equalsIgnoreCase("history")) {
-            if (args.length < 2) {
-                sender.sendMessage("§c/deathnote history <player>");
-                return true;
-            }
-
-            Player target = Bukkit.getPlayerExact(args[1]);
-
-            if (target == null) {
-                sender.sendMessage("§cPlayer must be online.");
-                return true;
-            }
-
-            List<String> records = history.get(target.getUniqueId());
-
-            sender.sendMessage("§c§lDEATH HISTORY: §f" + target.getName());
-
-            if (records == null || records.isEmpty()) {
-                sender.sendMessage("§7No recorded executions.");
-                return true;
-            }
-
-            for (String record : records) {
-                sender.sendMessage("§7- §f" + record);
-            }
-
-            return true;
-        }
-
-        if (args[0].equalsIgnoreCase("cancel")) {
-            if (args.length < 2) {
-                sender.sendMessage("§c/deathnote cancel <victim>");
-                return true;
-            }
-
-            Player target = Bukkit.getPlayerExact(args[1]);
-
-            if (target == null) {
-                sender.sendMessage("§cPlayer not found.");
-                return true;
-            }
-
-            BukkitTask task = scheduledDeaths.remove(target.getUniqueId());
-
-            if (task == null) {
-                sender.sendMessage("§cNo scheduled death for that player.");
-            } else {
-                task.cancel();
-                sender.sendMessage("§aExecution cancelled.");
-                target.sendMessage("§aYour scheduled execution was cancelled.");
-            }
-
-            return true;
-        }
-
-        if (args[0].equalsIgnoreCase("reload")) {
-            reloadConfig();
-            sender.sendMessage("§aDeathNote configuration reloaded.");
-            return true;
-        }
-
-        sender.sendMessage("§cUnknown command. Use /deathnote help");
-        return true;
-    }
-
-    // =====================================================
-    // EXECUTION SYSTEM
-    // =====================================================
-
-    private void executeDeath(
-            Player executor,
-            String victimName,
-            DeathMethod selectedMethod
-    ) {
-        Player victim = Bukkit.getPlayerExact(victimName);
-
-        if (victim == null) {
-            executor.sendMessage("§cThat player is not online.");
-            return;
-        }
-
-        if (victim.equals(executor)) {
-            executor.sendMessage("§cYou cannot execute yourself.");
-            return;
-        }
-
-        long cooldown = getConfig().getLong("cooldown-seconds", 30);
-        long now = System.currentTimeMillis();
-
-        if (!executor.hasPermission("deathnote.bypass")) {
-            long last = cooldowns.getOrDefault(
-                    executor.getUniqueId(),
-                    0L
-            );
-
-            long remaining = cooldown * 1000L - (now - last);
-
-            if (remaining > 0) {
-                executor.sendMessage(
-                        "§cWait " + (remaining / 1000 + 1) +
-                        " seconds before using the Death Note again."
-                );
-                return;
-            }
-        }
-
-        DeathMethod method = selectedMethod;
-
+    private void executeDeath(Player executor, Player victim, DeathMethod method) {
         if (method == DeathMethod.RANDOM) {
-            List<DeathMethod> choices = new ArrayList<>(
-                    Arrays.asList(DeathMethod.values())
-            );
+            DeathMethod[] values = Arrays.stream(DeathMethod.values())
+                    .filter(m -> m != DeathMethod.RANDOM)
+                    .toArray(DeathMethod[]::new);
 
-            choices.remove(DeathMethod.RANDOM);
-            method = choices.get(new Random().nextInt(choices.size()));
+            method = values[new Random().nextInt(values.length)];
         }
 
-        if (method == DeathMethod.DEATHBOT) {
-            executeDeathBot(executor, victim);
-            cooldowns.put(executor.getUniqueId(), now);
-            return;
-        }
+        history.computeIfAbsent(victim.getUniqueId(), k -> new ArrayList<>())
+                .add(method.name() + " - " + executor.getName());
 
-        final DeathMethod finalMethod = method;
-
-        BukkitTask previous = scheduledDeaths.remove(victim.getUniqueId());
-
-        if (previous != null) {
-            previous.cancel();
-        }
-
-        executor.sendMessage("§cThe Death Note has accepted its victim.");
-        executor.sendMessage("§7Method: §f" + method.display);
+        executor.sendMessage(ChatColor.DARK_RED +
+                "The Death Note has selected " + victim.getName() + ".");
 
         victim.sendTitle(
-                "§4§lDEATH NOTE",
-                "§cYour name has been written...",
-                10, 50, 10
+                ChatColor.DARK_RED + "DEATH NOTE",
+                ChatColor.GRAY + "Your name has been written...",
+                10, 60, 20
         );
 
-        victim.playSound(
-                victim.getLocation(),
-                Sound.ENTITY_WARDEN_HEARTBEAT,
-                1f,
-                0.6f
+        if (method == DeathMethod.DEATHBOT) {
+            executeDeathBot(victim);
+            return;
+        }
+
+        performDeath(victim, method);
+    }
+
+    // --------------------------------------------------
+    // DEATHBOT
+    // --------------------------------------------------
+
+    private void executeDeathBot(Player victim) {
+        World world = victim.getWorld();
+
+        createArena(victim);
+
+        Location spawnLocation = victim.getLocation().clone();
+
+        Bukkit.dispatchCommand(
+                Bukkit.getConsoleSender(),
+                "pvpbot spawn Death"
         );
 
-        int delay = Math.max(
-                0,
-                getConfig().getInt("death-delay-seconds", 2)
-        );
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            Bukkit.dispatchCommand(
+                    Bukkit.getConsoleSender(),
+                    "pvpbot kit give long Death"
+            );
+        }, 20L);
 
-        BukkitTask task = Bukkit.getScheduler().runTaskLater(this, () -> {
-            scheduledDeaths.remove(victim.getUniqueId());
-
-            if (!victim.isOnline() || victim.isDead()) {
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            if (!victim.isOnline()) {
                 return;
             }
 
-            performDeath(victim, finalMethod);
-
-            String record = finalMethod.display + " - " + new Date();
-
-            history.computeIfAbsent(
-                    victim.getUniqueId(),
-                    key -> new ArrayList<>()
-            ).add(record);
-
-            Bukkit.broadcastMessage(
-                    "§4§lDEATH NOTE §8» §c" +
-                    victim.getName() +
-                    " §7was executed by §c" +
-                    finalMethod.display +
-                    "§7."
+            // Teleport Death directly to the victim.
+            Bukkit.dispatchCommand(
+                    Bukkit.getConsoleSender(),
+                    "tp Death " + victim.getName()
             );
 
-        }, delay * 20L);
+            // Also try Bukkit teleport if Death is registered as a Player.
+            Player deathPlayer = Bukkit.getPlayerExact("Death");
 
-        scheduledDeaths.put(victim.getUniqueId(), task);
-        cooldowns.put(executor.getUniqueId(), now);
+            if (deathPlayer != null) {
+                Location behindVictim = victim.getLocation().clone();
+
+                behindVictim.add(
+                        victim.getLocation().getDirection().multiply(-2)
+                );
+
+                behindVictim.setY(victim.getLocation().getY());
+
+                deathPlayer.teleport(behindVictim);
+            }
+
+            victim.sendMessage(ChatColor.DARK_RED +
+                    "Death has arrived. Survive.");
+        }, 40L);
     }
 
-    private void kill(Player target) {
-        if (target.isOnline() && !target.isDead()) {
-            target.setHealth(0);
+    // --------------------------------------------------
+    // DEATH ARENA
+    // --------------------------------------------------
+
+    private void createArena(Player victim) {
+        restoreArenaForVictim(victim.getUniqueId());
+
+        Location center = victim.getLocation().getBlock().getLocation();
+
+        World world = center.getWorld();
+
+        if (world == null) {
+            return;
+        }
+
+        Arena arena = new Arena(victim.getUniqueId());
+
+        int radius = 30;
+
+        int centerX = center.getBlockX();
+        int centerY = center.getBlockY();
+        int centerZ = center.getBlockZ();
+
+        int minY = world.getMinHeight();
+        int maxY = world.getMaxHeight() - 1;
+
+        for (int x = -radius; x <= radius; x++) {
+            for (int z = -radius; z <= radius; z++) {
+                for (int y = 0; y <= radius; y++) {
+                    double distance = Math.sqrt(
+                            (x * x) + (y * y) + (z * z)
+                    );
+
+                    // A hollow upper hemisphere dome.
+                    if (distance < radius - 1.0 || distance > radius) {
+                        continue;
+                    }
+
+                    int blockY = centerY + y;
+
+                    if (blockY <= minY || blockY >= maxY) {
+                        continue;
+                    }
+
+                    Block block = world.getBlockAt(
+                            centerX + x,
+                            blockY,
+                            centerZ + z
+                    );
+
+                    BlockKey key = BlockKey.of(block);
+
+                    if (protectedBlocks.contains(key)) {
+                        continue;
+                    }
+
+                    arena.originalBlocks.put(key, block.getState());
+
+                    block.setType(Material.BLACK_CONCRETE, false);
+
+                    protectedBlocks.add(key);
+                }
+            }
+        }
+
+        arenas.put(victim.getUniqueId(), arena);
+
+        arena.timeout = Bukkit.getScheduler().runTaskLater(
+                this,
+                () -> restoreArena(arena),
+                20L * 60L * 10L
+        );
+
+        victim.sendMessage(ChatColor.DARK_GRAY +
+                "A black concrete Death Domain has surrounded you.");
+    }
+
+    private void restoreArenaForVictim(UUID victim) {
+        Arena old = arenas.get(victim);
+
+        if (old != null) {
+            restoreArena(old);
         }
     }
 
-    private void damage(Player target, double amount) {
-        if (target.isOnline() && !target.isDead()) {
-            target.damage(amount);
+    private void restoreArena(Arena arena) {
+        if (arena.timeout != null) {
+            arena.timeout.cancel();
+        }
+
+        for (Map.Entry<BlockKey, BlockState> entry :
+                arena.originalBlocks.entrySet()) {
+
+            BlockKey key = entry.getKey();
+
+            protectedBlocks.remove(key);
+
+            World world = Bukkit.getWorld(key.world());
+
+            if (world == null) {
+                continue;
+            }
+
+            BlockState original = entry.getValue();
+
+            original.update(true, false);
+        }
+
+        arenas.remove(arena.victim);
+    }
+
+    @EventHandler
+    public void onVictimDeath(PlayerDeathEvent event) {
+        restoreArenaForVictim(event.getEntity().getUniqueId());
+    }
+
+    @EventHandler
+    public void onVictimQuit(PlayerQuitEvent event) {
+        restoreArenaForVictim(event.getPlayer().getUniqueId());
+    }
+
+    @EventHandler
+    public void onBlockBreak(BlockBreakEvent event) {
+        if (protectedBlocks.contains(BlockKey.of(event.getBlock()))) {
+            event.setCancelled(true);
         }
     }
 
-    private void spawnMob(
-            World world,
-            Location location,
-            EntityType type,
-            Player target
-    ) {
-        Entity entity = world.spawnEntity(location, type);
-
-        if (entity instanceof Mob mob) {
-            mob.setTarget(target);
+    @EventHandler
+    public void onBlockPlace(BlockPlaceEvent event) {
+        if (protectedBlocks.contains(BlockKey.of(event.getBlock()))) {
+            event.setCancelled(true);
         }
     }
+
+    @EventHandler
+    public void onExplosion(EntityExplodeEvent event) {
+        event.blockList().removeIf(block ->
+                protectedBlocks.contains(BlockKey.of(block))
+        );
+    }
+
+    // --------------------------------------------------
+    // DEATH METHODS
+    // --------------------------------------------------
 
     private void performDeath(Player target, DeathMethod method) {
-        Location loc = target.getLocation();
+        Location location = target.getLocation();
         World world = target.getWorld();
 
-        world.playSound(
-                loc,
-                Sound.ENTITY_WITHER_SPAWN,
-                1f,
-                0.7f
-        );
-
-        world.spawnParticle(
-                Particle.SMOKE,
-                loc.clone().add(0, 1, 0),
-                50,
-                0.5, 0.8, 0.5,
-                0.03
-        );
-
         switch (method) {
-
             case LIGHTNING, DIVINE -> {
-                world.strikeLightning(target.getLocation());
+                world.strikeLightningEffect(location);
                 kill(target);
             }
 
-            case FALL -> {
-                target.setVelocity(new Vector(0, 2.5, 0));
-                Bukkit.getScheduler().runTaskLater(
-                        this,
-                        () -> damage(target, 1000),
-                        30L
+            case FALL, METEOR -> {
+                world.spawnParticle(
+                        Particle.EXPLOSION,
+                        location,
+                        20
                 );
+                target.setVelocity(target.getVelocity().setY(2.5));
+                Bukkit.getScheduler().runTaskLater(this, () -> kill(target), 35L);
             }
 
-            case DROWN, RIPTIDE -> {
+            case DROWN -> {
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.SLOWNESS,
-                        100,
-                        5
+                        PotionEffectType.WATER_BREATHING,
+                        1,
+                        0
                 ));
-                damage(target, 1000);
+                target.damage(1000);
             }
 
             case SUFFOCATE -> {
@@ -706,92 +676,53 @@ public final class DeathNotePlugin extends JavaPlugin
                         100,
                         10
                 ));
-                damage(target, 1000);
+                kill(target);
             }
 
-            case LAVA -> {
-                target.setFireTicks(200);
-                world.spawnParticle(
-                        Particle.LAVA,
-                        target.getLocation(),
-                        30
-                );
-                damage(target, 1000);
+            case LAVA, FIRESTORM -> {
+                target.setFireTicks(100);
+                world.spawnParticle(Particle.FLAME, location, 80);
+                kill(target);
             }
 
             case STARVE -> {
                 target.setFoodLevel(0);
                 target.setSaturation(0);
-                damage(target, 1000);
+                kill(target);
             }
 
             case FREEZE -> {
-                target.setFreezeTicks(target.getMaxFreezeTicks());
-                damage(target, 1000);
+                target.setFreezeTicks(400);
+                world.spawnParticle(Particle.SNOWFLAKE, location, 60);
+                kill(target);
             }
 
-            case VOID -> {
-                target.teleport(new Location(
-                        world,
-                        target.getLocation().getX(),
-                        world.getMinHeight() - 10,
-                        target.getLocation().getZ()
-                ));
-
-                Bukkit.getScheduler().runTaskLater(
-                        this,
-                        () -> damage(target, 1000),
-                        10L
-                );
+            case VOID, BLACK_HOLE -> {
+                target.setVelocity(target.getVelocity().setY(-5));
+                world.spawnParticle(Particle.PORTAL, location, 100);
+                kill(target);
             }
 
             case CACTUS -> {
-                world.spawnParticle(
-                        Particle.BLOCK,
-                        target.getLocation().add(0, 1, 0),
-                        40,
-                        0.5, 0.8, 0.5,
-                        Material.CACTUS.createBlockData()
-                );
-                damage(target, 1000);
+                world.spawnParticle(Particle.CRIT, location, 50);
+                target.damage(1000);
             }
 
-            case ANVIL -> {
-                Location above = target.getLocation().add(0, 5, 0);
-                world.spawnFallingBlock(
-                        above,
-                        Material.ANVIL.createBlockData()
-                );
-                damage(target, 1000);
+            case ANVIL, RANDOM_TRAP -> {
+                world.spawnParticle(Particle.BLOCK, location, 60,
+                        Material.ANVIL.createBlockData());
+                kill(target);
             }
 
-            case HEART -> {
-                target.playSound(
-                        target.getLocation(),
-                        Sound.ENTITY_PLAYER_HURT,
-                        1f,
-                        0.3f
-                );
-
-                target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.DARKNESS,
-                        100,
-                        1
-                ));
-
-                damage(target, 1000);
+            case HEART, BLOOD_MOON -> {
+                world.spawnParticle(Particle.DAMAGE_INDICATOR, location, 50);
+                target.damage(1000);
             }
 
             case CREEPER -> {
-                Creeper creeper = (Creeper) world.spawnEntity(
-                        target.getLocation(),
-                        EntityType.CREEPER
-                );
-
-                creeper.setCustomName("§4Death's Creeper");
-                creeper.setCustomNameVisible(true);
-                creeper.ignite();
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.CREEPER);
+                world.createExplosion(location, 4.0f, false, false);
+                kill(target);
             }
 
             case POISON -> {
@@ -800,246 +731,96 @@ public final class DeathNotePlugin extends JavaPlugin
                         200,
                         10
                 ));
-
-                target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.WITHER,
-                        200,
-                        5
-                ));
-
-                damage(target, 1000);
+                kill(target);
             }
 
             case ELYTRA -> {
-                target.setVelocity(new Vector(0, 2, 0));
-                target.playSound(
-                        loc,
-                        Sound.ENTITY_PLAYER_ATTACK_CRIT,
-                        1f,
-                        0.5f
-                );
-
-                Bukkit.getScheduler().runTaskLater(
-                        this,
-                        () -> damage(target, 1000),
-                        20L
-                );
+                target.setVelocity(target.getVelocity().setY(5));
+                Bukkit.getScheduler().runTaskLater(this, () -> kill(target), 30L);
             }
 
-            case TRIDENT -> {
-                world.spawnParticle(
-                        Particle.CRIT,
-                        target.getLocation().add(0, 1, 0),
-                        40,
-                        0.5, 0.5, 0.5
-                );
-                damage(target, 1000);
+            case TRIDENT, RIPTIDE -> {
+                world.spawnParticle(Particle.SPLASH, location, 80);
+                target.damage(1000);
             }
 
             case PHANTOM -> {
-                for (int i = 0; i < 5; i++) {
-                    Phantom phantom = (Phantom) world.spawnEntity(
-                            target.getLocation().add(i - 2, 4, i - 2),
-                            EntityType.PHANTOM
-                    );
-                    phantom.setTarget(target);
-                }
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.PHANTOM);
+                kill(target);
             }
 
             case WARDEN -> {
-                spawnMob(
-                        world,
-                        target.getLocation().add(3, 0, 0),
-                        EntityType.WARDEN,
-                        target
-                );
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.WARDEN);
+                kill(target);
             }
 
-            case TNT_MINECART, RANDOM_TRAP -> {
-                world.spawnEntity(
-                        target.getLocation(),
-                        EntityType.TNT_MINECART
-                );
-                damage(target, 1000);
+            case TNT_MINECART -> {
+                world.createExplosion(location, 5.0f, false, false);
+                kill(target);
             }
 
             case CRYSTAL -> {
-                world.createExplosion(
-                        target.getLocation(),
-                        20f,
-                        false,
-                        false
-                );
-                damage(target, 1000);
-            }
-
-            case FIRESTORM, SOUL_FIRE -> {
-                target.setFireTicks(200);
-                world.spawnParticle(
-                        Particle.FLAME,
-                        target.getLocation(),
-                        100,
-                        1, 1, 1,
-                        0.1
-                );
-                damage(target, 1000);
+                world.spawnParticle(Particle.EXPLOSION, location, 100);
+                world.createExplosion(location, 6.0f, false, false);
+                kill(target);
             }
 
             case ENDERMAN -> {
-                spawnMob(
-                        world,
-                        target.getLocation().add(2, 0, 0),
-                        EntityType.ENDERMAN,
-                        target
-                );
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.ENDERMAN);
+                kill(target);
             }
 
             case RAVAGER -> {
-                spawnMob(
-                        world,
-                        target.getLocation().add(3, 0, 0),
-                        EntityType.RAVAGER,
-                        target
-                );
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.RAVAGER);
+                kill(target);
             }
 
             case GOLEM -> {
-                spawnMob(
-                        world,
-                        target.getLocation().add(2, 0, 0),
-                        EntityType.IRON_GOLEM,
-                        target
-                );
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.IRON_GOLEM);
+                kill(target);
             }
 
             case WITHER -> {
-                spawnMob(
-                        world,
-                        target.getLocation().add(4, 0, 0),
-                        EntityType.WITHER,
-                        target
-                );
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.WITHER);
+                kill(target);
             }
 
             case GHAST -> {
-                spawnMob(
-                        world,
-                        target.getLocation().add(5, 3, 0),
-                        EntityType.GHAST,
-                        target
-                );
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.GHAST);
+                kill(target);
             }
 
             case VEX -> {
-                for (int i = 0; i < 5; i++) {
-                    spawnMob(
-                            world,
-                            target.getLocation().add(i, 2, i),
-                            EntityType.VEX,
-                            target
-                    );
-                }
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.VEX);
+                kill(target);
             }
 
             case SILVERFISH -> {
-                for (int i = 0; i < 10; i++) {
-                    spawnMob(
-                            world,
-                            target.getLocation().add(i % 3, 0, i % 2),
-                            EntityType.SILVERFISH,
-                            target
-                    );
-                }
-                damage(target, 1000);
-            }
-
-            case METEOR -> {
-                Location meteor = target.getLocation().add(0, 8, 0);
-
-                world.spawnParticle(
-                        Particle.FLAME,
-                        meteor,
-                        100,
-                        1, 1, 1
-                );
-
-                world.createExplosion(
-                        target.getLocation(),
-                        15f,
-                        true,
-                        false
-                );
-
-                damage(target, 1000);
+                world.spawnEntity(location, EntityType.SILVERFISH);
+                kill(target);
             }
 
             case EARTHQUAKE -> {
-                world.spawnParticle(
-                        Particle.BLOCK,
-                        target.getLocation(),
-                        100,
-                        2, 1, 2,
-                        Material.DEEPSLATE.createBlockData()
-                );
-
-                target.setVelocity(new Vector(0, 2, 0));
-                damage(target, 1000);
-            }
-
-            case BLACK_HOLE -> {
-                world.spawnParticle(
-                        Particle.PORTAL,
-                        target.getLocation(),
-                        200,
-                        2, 2, 2,
-                        0.5
-                );
-
-                target.setVelocity(new Vector(0, 2, 0));
-                damage(target, 1000);
+                world.spawnParticle(Particle.BLOCK, location, 100,
+                        Material.DEEPSLATE.createBlockData());
+                target.setVelocity(target.getVelocity().setY(2));
+                kill(target);
             }
 
             case SOUL_DRAIN -> {
+                world.spawnParticle(Particle.SOUL, location, 100);
                 target.addPotionEffect(new PotionEffect(
                         PotionEffectType.WITHER,
                         200,
-                        10
-                ));
-
-                target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.DARKNESS,
-                        200,
-                        1
-                ));
-
-                damage(target, 1000);
-            }
-
-            case BLOOD_MOON -> {
-                world.setTime(18000);
-
-                world.spawnParticle(
-                        Particle.DAMAGE_INDICATOR,
-                        target.getLocation(),
-                        100,
-                        1, 1, 1
-                );
-
-                target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.WEAKNESS,
-                        200,
                         5
                 ));
+                kill(target);
+            }
 
-                damage(target, 1000);
+            case SOUL_FIRE -> {
+                world.spawnParticle(Particle.SOUL_FIRE_FLAME, location, 100);
+                target.setFireTicks(200);
+                kill(target);
             }
 
             case BLINDNESS -> {
@@ -1048,78 +829,182 @@ public final class DeathNotePlugin extends JavaPlugin
                         200,
                         1
                 ));
-
-                target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.DARKNESS,
-                        200,
-                        1
-                ));
-
-                damage(target, 1000);
+                kill(target);
             }
 
-            case DEATHBOT, RANDOM -> kill(target);
+            case RANDOM, DEATHBOT -> {
+                kill(target);
+            }
         }
     }
 
-    // =====================================================
-    // DEATHBOT INTEGRATION
-    // =====================================================
+    private void kill(Player target) {
+        if (target.isOnline() && !target.isDead()) {
+            target.setHealth(0);
+        }
+    }
 
-    private void executeDeathBot(Player executor, Player victim) {
-        if (!getConfig().getBoolean("deathbot.enabled", true)) {
-            executor.sendMessage(
-                    "§cDeathBot is disabled in the configuration."
-            );
-            return;
+    // --------------------------------------------------
+    // COMMANDS
+    // --------------------------------------------------
+
+    @Override
+    public boolean onCommand(
+            CommandSender sender,
+            Command command,
+            String label,
+            String[] args
+    ) {
+        if (!command.getName().equalsIgnoreCase("deathnote")) {
+            return false;
         }
 
-        if (Bukkit.getPluginManager().getPlugin("PvpBot") == null) {
-            executor.sendMessage(
-                    "§cPvpBot is not installed. DeathBot cannot run."
-            );
-            return;
+        if (!sender.hasPermission("deathnote.admin")) {
+            sender.sendMessage(ChatColor.RED + "No permission.");
+            return true;
         }
 
-        String spawnCommand = getConfig().getString(
-                "deathbot.spawn-command",
-                "pvpbot spawn Death %player%"
-        );
-
-        String kitCommand = getConfig().getString(
-                "deathbot.kit-command",
-                "pvpbot kit give long Death"
-        );
-
-        if (spawnCommand == null || kitCommand == null) {
-            executor.sendMessage("§cDeathBot commands are not configured.");
-            return;
+        if (args.length == 0) {
+            sender.sendMessage(ChatColor.RED +
+                    "/deathnote give <player>");
+            sender.sendMessage(ChatColor.RED +
+                    "/deathnote execute <victim> <method>");
+            sender.sendMessage(ChatColor.RED +
+                    "/deathnote methods");
+            sender.sendMessage(ChatColor.RED +
+                    "/deathnote history <player>");
+            sender.sendMessage(ChatColor.RED +
+                    "/deathnote cancel <player>");
+            return true;
         }
 
-        spawnCommand = spawnCommand.replace(
-                "%player%",
-                victim.getName()
-        );
+        switch (args[0].toLowerCase()) {
+            case "give" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Usage: /deathnote give <player>");
+                    return true;
+                }
 
-        boolean spawned = Bukkit.dispatchCommand(
-                Bukkit.getConsoleSender(),
-                spawnCommand
-        );
+                Player player = Bukkit.getPlayerExact(args[1]);
 
-        Bukkit.dispatchCommand(
-                Bukkit.getConsoleSender(),
-                kitCommand
-        );
+                if (player == null) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Player not found.");
+                    return true;
+                }
 
-        Bukkit.broadcastMessage(
-                "§4§lDEATH NOTE §8» §cDeath has arrived for " +
-                victim.getName() + "§7."
-        );
+                player.getInventory().addItem(createDeathNote());
 
-        executor.sendMessage(
-                spawned
-                        ? "§aDeathBot commands dispatched."
-                        : "§eDeathBot spawn command was dispatched; check PvpBot syntax."
-        );
+                sender.sendMessage(ChatColor.GREEN +
+                        "Gave Death Note to " + player.getName());
+            }
+
+            case "methods" -> {
+                sender.sendMessage(ChatColor.DARK_RED +
+                        "Death Note methods:");
+
+                for (DeathMethod method : DeathMethod.values()) {
+                    sender.sendMessage(ChatColor.GRAY +
+                            "- " + formatMethod(method));
+                }
+            }
+
+            case "execute" -> {
+                if (args.length < 3) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Usage: /deathnote execute <victim> <method>");
+                    return true;
+                }
+
+                Player victim = Bukkit.getPlayerExact(args[1]);
+
+                if (victim == null) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Victim is not online.");
+                    return true;
+                }
+
+                DeathMethod method;
+
+                try {
+                    method = DeathMethod.valueOf(
+                            args[2].toUpperCase(Locale.ROOT)
+                                    .replace(' ', '_')
+                    );
+                } catch (IllegalArgumentException exception) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Unknown death method.");
+                    return true;
+                }
+
+                Player executor = sender instanceof Player p ? p : victim;
+
+                executeDeath(executor, victim, method);
+            }
+
+            case "history" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Usage: /deathnote history <player>");
+                    return true;
+                }
+
+                Player player = Bukkit.getPlayerExact(args[1]);
+
+                if (player == null) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Player must be online.");
+                    return true;
+                }
+
+                List<String> entries = history.get(player.getUniqueId());
+
+                sender.sendMessage(ChatColor.DARK_RED +
+                        "Death history for " + player.getName());
+
+                if (entries == null || entries.isEmpty()) {
+                    sender.sendMessage(ChatColor.GRAY + "No history.");
+                } else {
+                    for (String entry : entries) {
+                        sender.sendMessage(ChatColor.GRAY + "- " + entry);
+                    }
+                }
+            }
+
+            case "cancel" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Usage: /deathnote cancel <player>");
+                    return true;
+                }
+
+                Player player = Bukkit.getPlayerExact(args[1]);
+
+                if (player == null) {
+                    sender.sendMessage(ChatColor.RED +
+                            "Player not found.");
+                    return true;
+                }
+
+                awaitingVictim.remove(player.getUniqueId());
+                restoreArenaForVictim(player.getUniqueId());
+
+                sender.sendMessage(ChatColor.GREEN +
+                        "Cancelled Death Note execution for " +
+                        player.getName());
+            }
+
+            case "reload" -> {
+                reloadConfig();
+                sender.sendMessage(ChatColor.GREEN +
+                        "DeathNote reloaded.");
+            }
+
+            default -> sender.sendMessage(ChatColor.RED +
+                    "Unknown subcommand.");
+        }
+
+        return true;
     }
 }
