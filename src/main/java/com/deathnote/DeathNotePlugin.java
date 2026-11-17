@@ -1,17 +1,28 @@
 
-package me.deathnote;
+package com.deathnote;
 
-import org.bukkit.*;
-import org.bukkit.block.Block;
-import org.bukkit.command.*;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.*;
-import org.bukkit.event.*;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.player.*;
-import org.bukkit.inventory.*;
-import org.bukkit.inventory.meta.*;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BookMeta;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
@@ -21,7 +32,8 @@ import org.bukkit.util.Vector;
 
 import java.util.*;
 
-public final class DeathNotePlugin extends JavaPlugin implements Listener, CommandExecutor {
+public final class DeathNotePlugin extends JavaPlugin
+        implements Listener, CommandExecutor {
 
     private NamespacedKey bookKey;
 
@@ -87,23 +99,27 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
     public void onEnable() {
         bookKey = new NamespacedKey(this, "death_note");
 
-        saveDefaultConfig();
         getConfig().addDefault("cooldown-seconds", 30);
         getConfig().addDefault("death-delay-seconds", 2);
         getConfig().addDefault("deathbot.enabled", true);
-        getConfig().addDefault("deathbot.spawn-command", "pvpbot spawn Death %player%");
-        getConfig().addDefault("deathbot.kit-command", "pvpbot kit give long Death");
+        getConfig().addDefault(
+                "deathbot.spawn-command",
+                "pvpbot spawn Death %player%"
+        );
+        getConfig().addDefault(
+                "deathbot.kit-command",
+                "pvpbot kit give long Death"
+        );
         getConfig().options().copyDefaults(true);
         saveConfig();
 
         if (getCommand("deathnote") != null) {
             getCommand("deathnote").setExecutor(this);
         } else {
-            getLogger().severe("The deathnote command is missing from plugin.yml!");
+            getLogger().severe("Missing deathnote command in plugin.yml!");
         }
 
         getServer().getPluginManager().registerEvents(this, this);
-
         getLogger().info("DeathNote enabled!");
     }
 
@@ -123,6 +139,10 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
         ItemStack book = new ItemStack(Material.WRITTEN_BOOK);
         BookMeta meta = (BookMeta) book.getItemMeta();
 
+        if (meta == null) {
+            return book;
+        }
+
         meta.setTitle("Death Note");
         meta.setAuthor("Ryuk");
         meta.setDisplayName(BOOK_NAME);
@@ -135,12 +155,17 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
         ));
 
         meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+
         meta.getPersistentDataContainer().set(
-                bookKey, PersistentDataType.BYTE, (byte) 1
+                bookKey,
+                PersistentDataType.BYTE,
+                (byte) 1
         );
 
         meta.setPages(
-                "§0DEATH NOTE\n\n§8Write the name of the person whose fate you wish to decide.\n\n§7Their story ends when their name is written."
+                "§0DEATH NOTE\n\n" +
+                "§8Write the name of the person whose fate you wish to decide.\n\n" +
+                "§7Their story ends when their name is written."
         );
 
         book.setItemMeta(meta);
@@ -157,7 +182,8 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
         }
 
         return meta.getPersistentDataContainer().has(
-                bookKey, PersistentDataType.BYTE
+                bookKey,
+                PersistentDataType.BYTE
         );
     }
 
@@ -185,35 +211,53 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
 
         ItemStack filler = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
         ItemMeta fillerMeta = filler.getItemMeta();
-        fillerMeta.setDisplayName("§0");
-        filler.setItemMeta(fillerMeta);
+
+        if (fillerMeta != null) {
+            fillerMeta.setDisplayName("§0");
+            filler.setItemMeta(fillerMeta);
+        }
 
         for (int i = 0; i < 54; i++) {
             inventory.setItem(i, filler);
         }
 
-        addGuiItem(inventory, 4, Material.NETHER_STAR,
+        addGuiItem(
+                inventory,
+                4,
+                Material.NETHER_STAR,
                 "§c§lRANDOM DEATH",
-                "§7Choose a random execution method.");
-
-        DeathMethod[] methods = DeathMethod.values();
+                "§7Choose a random execution method."
+        );
 
         int slot = 9;
-        for (DeathMethod method : methods) {
-            if (method == DeathMethod.RANDOM) continue;
 
-            addGuiItem(inventory, slot, method.icon,
+        for (DeathMethod method : DeathMethod.values()) {
+            if (method == DeathMethod.RANDOM) {
+                continue;
+            }
+
+            if (slot >= 45) {
+                break;
+            }
+
+            addGuiItem(
+                    inventory,
+                    slot,
+                    method.icon,
                     "§c" + method.display,
-                    "§7Click to select this method.");
+                    "§7Click to select this method."
+            );
 
             slot++;
-
-            if (slot == 45) break;
         }
 
-        addGuiItem(inventory, 49, Material.BARRIER,
+        addGuiItem(
+                inventory,
+                49,
+                Material.BARRIER,
                 "§cClose",
-                "§7Close the Death Note.");
+                "§7Close the Death Note."
+        );
 
         player.openInventory(inventory);
     }
@@ -228,24 +272,32 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
 
-        meta.setDisplayName(name);
-        meta.setLore(Collections.singletonList(lore));
+        if (meta != null) {
+            meta.setDisplayName(name);
+            meta.setLore(Collections.singletonList(lore));
+            item.setItemMeta(meta);
+        }
 
-        item.setItemMeta(meta);
         inventory.setItem(slot, item);
     }
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
-        if (!event.getView().getTitle().equals(GUI_TITLE)) return;
+        if (!event.getView().getTitle().equals(GUI_TITLE)) {
+            return;
+        }
 
         event.setCancelled(true);
 
-        if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
+        }
 
         int slot = event.getRawSlot();
 
-        if (slot < 0 || slot >= 54) return;
+        if (slot < 0 || slot >= 54) {
+            return;
+        }
 
         if (slot == 49) {
             player.closeInventory();
@@ -257,28 +309,27 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
             return;
         }
 
-        DeathMethod[] methods = DeathMethod.values();
-        int methodIndex = slot - 9;
-
-        if (methodIndex < 0) return;
-
         List<DeathMethod> selectable = new ArrayList<>();
 
-        for (DeathMethod method : methods) {
+        for (DeathMethod method : DeathMethod.values()) {
             if (method != DeathMethod.RANDOM) {
                 selectable.add(method);
             }
         }
 
-        if (methodIndex >= selectable.size()) return;
+        int methodIndex = slot - 9;
+
+        if (methodIndex < 0 || methodIndex >= selectable.size()) {
+            return;
+        }
 
         selectMethod(player, selectable.get(methodIndex));
     }
 
     private void selectMethod(Player player, DeathMethod method) {
         waitingForVictim.put(player.getUniqueId(), method.name());
-
         player.closeInventory();
+
         player.sendMessage("§8§m--------------------------------");
         player.sendMessage("§c§lDEATH NOTE");
         player.sendMessage("§7Selected: §c" + method.display);
@@ -288,17 +339,18 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
     }
 
     @EventHandler
-    public void onChat(PlayerChatEvent event) {
+    public void onChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
+        UUID uuid = player.getUniqueId();
 
-        if (!waitingForVictim.containsKey(player.getUniqueId())) {
+        if (!waitingForVictim.containsKey(uuid)) {
             return;
         }
 
         event.setCancelled(true);
 
         String victimName = event.getMessage().trim();
-        String methodName = waitingForVictim.remove(player.getUniqueId());
+        String methodName = waitingForVictim.remove(uuid);
 
         Bukkit.getScheduler().runTask(this, () -> {
             if (victimName.equalsIgnoreCase("cancel")) {
@@ -356,8 +408,19 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
                 return true;
             }
 
-            target.getInventory().addItem(createBook());
-            sender.sendMessage("§aDeath Note given to " + target.getName() + ".");
+            Map<Integer, ItemStack> leftovers =
+                    target.getInventory().addItem(createBook());
+
+            leftovers.values().forEach(item ->
+                    target.getWorld().dropItemNaturally(
+                            target.getLocation(),
+                            item
+                    )
+            );
+
+            sender.sendMessage(
+                    "§aDeath Note given to " + target.getName() + "."
+            );
             return true;
         }
 
@@ -476,12 +539,18 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
         long now = System.currentTimeMillis();
 
         if (!executor.hasPermission("deathnote.bypass")) {
-            long last = cooldowns.getOrDefault(executor.getUniqueId(), 0L);
+            long last = cooldowns.getOrDefault(
+                    executor.getUniqueId(),
+                    0L
+            );
+
             long remaining = cooldown * 1000L - (now - last);
 
             if (remaining > 0) {
-                executor.sendMessage("§cWait " + (remaining / 1000 + 1)
-                        + " seconds before using the Death Note again.");
+                executor.sendMessage(
+                        "§cWait " + (remaining / 1000 + 1) +
+                        " seconds before using the Death Note again."
+                );
                 return;
             }
         }
@@ -492,8 +561,8 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
             List<DeathMethod> choices = new ArrayList<>(
                     Arrays.asList(DeathMethod.values())
             );
-            choices.remove(DeathMethod.RANDOM);
 
+            choices.remove(DeathMethod.RANDOM);
             method = choices.get(new Random().nextInt(choices.size()));
         }
 
@@ -506,30 +575,55 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
         final DeathMethod finalMethod = method;
 
         BukkitTask previous = scheduledDeaths.remove(victim.getUniqueId());
-        if (previous != null) previous.cancel();
+
+        if (previous != null) {
+            previous.cancel();
+        }
 
         executor.sendMessage("§cThe Death Note has accepted its victim.");
         executor.sendMessage("§7Method: §f" + method.display);
 
-        victim.sendTitle("§4§lDEATH NOTE", "§cYour name has been written...", 10, 50, 10);
-        victim.playSound(victim.getLocation(), Sound.ENTITY_WARDEN_HEARTBEAT, 1f, 0.6f);
+        victim.sendTitle(
+                "§4§lDEATH NOTE",
+                "§cYour name has been written...",
+                10, 50, 10
+        );
 
-        int delay = Math.max(0, getConfig().getInt("death-delay-seconds", 2));
+        victim.playSound(
+                victim.getLocation(),
+                Sound.ENTITY_WARDEN_HEARTBEAT,
+                1f,
+                0.6f
+        );
+
+        int delay = Math.max(
+                0,
+                getConfig().getInt("death-delay-seconds", 2)
+        );
 
         BukkitTask task = Bukkit.getScheduler().runTaskLater(this, () -> {
             scheduledDeaths.remove(victim.getUniqueId());
 
-            if (!victim.isOnline() || victim.isDead()) return;
+            if (!victim.isOnline() || victim.isDead()) {
+                return;
+            }
 
             performDeath(victim, finalMethod);
 
             String record = finalMethod.display + " - " + new Date();
-            history.computeIfAbsent(victim.getUniqueId(), k -> new ArrayList<>())
-                    .add(record);
 
-            Bukkit.broadcastMessage("§4§lDEATH NOTE §8» §c"
-                    + victim.getName() + " §7was executed by §c"
-                    + finalMethod.display + "§7.");
+            history.computeIfAbsent(
+                    victim.getUniqueId(),
+                    key -> new ArrayList<>()
+            ).add(record);
+
+            Bukkit.broadcastMessage(
+                    "§4§lDEATH NOTE §8» §c" +
+                    victim.getName() +
+                    " §7was executed by §c" +
+                    finalMethod.display +
+                    "§7."
+            );
 
         }, delay * 20L);
 
@@ -549,13 +643,37 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
         }
     }
 
+    private void spawnMob(
+            World world,
+            Location location,
+            EntityType type,
+            Player target
+    ) {
+        Entity entity = world.spawnEntity(location, type);
+
+        if (entity instanceof Mob mob) {
+            mob.setTarget(target);
+        }
+    }
+
     private void performDeath(Player target, DeathMethod method) {
         Location loc = target.getLocation();
         World world = target.getWorld();
 
-        world.playSound(loc, Sound.ENTITY_WITHER_SPAWN, 1f, 0.7f);
-        world.spawnParticle(Particle.SMOKE, loc.add(0, 1, 0),
-                50, 0.5, 0.8, 0.5, 0.03);
+        world.playSound(
+                loc,
+                Sound.ENTITY_WITHER_SPAWN,
+                1f,
+                0.7f
+        );
+
+        world.spawnParticle(
+                Particle.SMOKE,
+                loc.clone().add(0, 1, 0),
+                50,
+                0.5, 0.8, 0.5,
+                0.03
+        );
 
         switch (method) {
 
@@ -566,28 +684,38 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
 
             case FALL -> {
                 target.setVelocity(new Vector(0, 2.5, 0));
-                Bukkit.getScheduler().runTaskLater(this,
-                        () -> damage(target, 1000), 30L);
+                Bukkit.getScheduler().runTaskLater(
+                        this,
+                        () -> damage(target, 1000),
+                        30L
+                );
             }
 
             case DROWN, RIPTIDE -> {
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.WATER_BREATHING, 0, 0
+                        PotionEffectType.SLOWNESS,
+                        100,
+                        5
                 ));
                 damage(target, 1000);
             }
 
             case SUFFOCATE -> {
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.SLOWNESS, 100, 10
+                        PotionEffectType.SLOWNESS,
+                        100,
+                        10
                 ));
                 damage(target, 1000);
             }
 
             case LAVA -> {
                 target.setFireTicks(200);
-                world.spawnParticle(Particle.LAVA,
-                        target.getLocation(), 30);
+                world.spawnParticle(
+                        Particle.LAVA,
+                        target.getLocation(),
+                        30
+                );
                 damage(target, 1000);
             }
 
@@ -604,67 +732,107 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
 
             case VOID -> {
                 target.teleport(new Location(
-                        world, target.getLocation().getX(),
+                        world,
+                        target.getLocation().getX(),
                         world.getMinHeight() - 10,
                         target.getLocation().getZ()
                 ));
-                Bukkit.getScheduler().runTaskLater(this,
-                        () -> damage(target, 1000), 10L);
+
+                Bukkit.getScheduler().runTaskLater(
+                        this,
+                        () -> damage(target, 1000),
+                        10L
+                );
             }
 
             case CACTUS -> {
-                world.spawnParticle(Particle.BLOCK,
+                world.spawnParticle(
+                        Particle.BLOCK,
                         target.getLocation().add(0, 1, 0),
-                        40, 0.5, 0.8, 0.5,
-                        Material.CACTUS.createBlockData());
+                        40,
+                        0.5, 0.8, 0.5,
+                        Material.CACTUS.createBlockData()
+                );
                 damage(target, 1000);
             }
 
             case ANVIL -> {
                 Location above = target.getLocation().add(0, 5, 0);
-                world.spawnFallingBlock(above, Material.ANVIL.createBlockData());
+                world.spawnFallingBlock(
+                        above,
+                        Material.ANVIL.createBlockData()
+                );
                 damage(target, 1000);
             }
 
             case HEART -> {
-                target.playSound(target.getLocation(),
-                        Sound.ENTITY_PLAYER_HURT, 1f, 0.3f);
+                target.playSound(
+                        target.getLocation(),
+                        Sound.ENTITY_PLAYER_HURT,
+                        1f,
+                        0.3f
+                );
+
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.DARKNESS, 100, 1
+                        PotionEffectType.DARKNESS,
+                        100,
+                        1
                 ));
+
                 damage(target, 1000);
             }
 
             case CREEPER -> {
                 Creeper creeper = (Creeper) world.spawnEntity(
-                        target.getLocation(), EntityType.CREEPER
+                        target.getLocation(),
+                        EntityType.CREEPER
                 );
+
                 creeper.setCustomName("§4Death's Creeper");
+                creeper.setCustomNameVisible(true);
                 creeper.ignite();
                 damage(target, 1000);
             }
 
             case POISON -> {
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.POISON, 200, 10
+                        PotionEffectType.POISON,
+                        200,
+                        10
                 ));
+
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.WITHER, 200, 5
+                        PotionEffectType.WITHER,
+                        200,
+                        5
                 ));
+
                 damage(target, 1000);
             }
 
             case ELYTRA -> {
                 target.setVelocity(new Vector(0, 2, 0));
-                target.playSound(loc, Sound.ENTITY_PLAYER_ATTACK_CRIT, 1f, 0.5f);
-                Bukkit.getScheduler().runTaskLater(this,
-                        () -> damage(target, 1000), 20L);
+                target.playSound(
+                        loc,
+                        Sound.ENTITY_PLAYER_ATTACK_CRIT,
+                        1f,
+                        0.5f
+                );
+
+                Bukkit.getScheduler().runTaskLater(
+                        this,
+                        () -> damage(target, 1000),
+                        20L
+                );
             }
 
             case TRIDENT -> {
-                world.spawnParticle(Particle.CRIT,
+                world.spawnParticle(
+                        Particle.CRIT,
                         target.getLocation().add(0, 1, 0),
-                        40, 0.5, 0.5, 0.5);
+                        40,
+                        0.5, 0.5, 0.5
+                );
                 damage(target, 1000);
             }
 
@@ -680,148 +848,213 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
             }
 
             case WARDEN -> {
-                Warden warden = (Warden) world.spawnEntity(
+                spawnMob(
+                        world,
                         target.getLocation().add(3, 0, 0),
-                        EntityType.WARDEN
+                        EntityType.WARDEN,
+                        target
                 );
-                warden.setTarget(target);
                 damage(target, 1000);
             }
 
             case TNT_MINECART, RANDOM_TRAP -> {
-                world.spawnEntity(target.getLocation(),
-                        EntityType.PRIMED_TNT);
+                world.spawnEntity(
+                        target.getLocation(),
+                        EntityType.TNT_MINECART
+                );
                 damage(target, 1000);
             }
 
             case CRYSTAL -> {
-                world.createExplosion(target.getLocation(), 20f, false, false);
+                world.createExplosion(
+                        target.getLocation(),
+                        20f,
+                        false,
+                        false
+                );
                 damage(target, 1000);
             }
 
             case FIRESTORM, SOUL_FIRE -> {
                 target.setFireTicks(200);
-                world.spawnParticle(Particle.FLAME,
-                        target.getLocation(), 100, 1, 1, 1, 0.1);
+                world.spawnParticle(
+                        Particle.FLAME,
+                        target.getLocation(),
+                        100,
+                        1, 1, 1,
+                        0.1
+                );
                 damage(target, 1000);
             }
 
             case ENDERMAN -> {
-                Enderman enderman = (Enderman) world.spawnEntity(
+                spawnMob(
+                        world,
                         target.getLocation().add(2, 0, 0),
-                        EntityType.ENDERMAN
+                        EntityType.ENDERMAN,
+                        target
                 );
-                enderman.setTarget(target);
                 damage(target, 1000);
             }
 
             case RAVAGER -> {
-                Ravager ravager = (Ravager) world.spawnEntity(
+                spawnMob(
+                        world,
                         target.getLocation().add(3, 0, 0),
-                        EntityType.RAVAGER
+                        EntityType.RAVAGER,
+                        target
                 );
-                ravager.setTarget(target);
                 damage(target, 1000);
             }
 
             case GOLEM -> {
-                IronGolem golem = (IronGolem) world.spawnEntity(
+                spawnMob(
+                        world,
                         target.getLocation().add(2, 0, 0),
-                        EntityType.IRON_GOLEM
+                        EntityType.IRON_GOLEM,
+                        target
                 );
-                golem.setTarget(target);
                 damage(target, 1000);
             }
 
             case WITHER -> {
-                Wither wither = (Wither) world.spawnEntity(
+                spawnMob(
+                        world,
                         target.getLocation().add(4, 0, 0),
-                        EntityType.WITHER
+                        EntityType.WITHER,
+                        target
                 );
-                wither.setTarget(target);
                 damage(target, 1000);
             }
 
             case GHAST -> {
-                Ghast ghast = (Ghast) world.spawnEntity(
+                spawnMob(
+                        world,
                         target.getLocation().add(5, 3, 0),
-                        EntityType.GHAST
+                        EntityType.GHAST,
+                        target
                 );
-                ghast.setTarget(target);
                 damage(target, 1000);
             }
 
             case VEX -> {
                 for (int i = 0; i < 5; i++) {
-                    Vex vex = (Vex) world.spawnEntity(
+                    spawnMob(
+                            world,
                             target.getLocation().add(i, 2, i),
-                            EntityType.VEX
+                            EntityType.VEX,
+                            target
                     );
-                    vex.setTarget(target);
                 }
                 damage(target, 1000);
             }
 
             case SILVERFISH -> {
                 for (int i = 0; i < 10; i++) {
-                    Silverfish silverfish = (Silverfish) world.spawnEntity(
+                    spawnMob(
+                            world,
                             target.getLocation().add(i % 3, 0, i % 2),
-                            EntityType.SILVERFISH
+                            EntityType.SILVERFISH,
+                            target
                     );
-                    silverfish.setTarget(target);
                 }
                 damage(target, 1000);
             }
 
             case METEOR -> {
                 Location meteor = target.getLocation().add(0, 8, 0);
-                world.spawnParticle(Particle.FLAME, meteor, 100, 1, 1, 1);
-                world.createExplosion(target.getLocation(), 15f, true, false);
+
+                world.spawnParticle(
+                        Particle.FLAME,
+                        meteor,
+                        100,
+                        1, 1, 1
+                );
+
+                world.createExplosion(
+                        target.getLocation(),
+                        15f,
+                        true,
+                        false
+                );
+
                 damage(target, 1000);
             }
 
             case EARTHQUAKE -> {
-                world.spawnParticle(Particle.BLOCK,
-                        target.getLocation(), 100, 2, 1, 2,
-                        Material.DEEPSLATE.createBlockData());
+                world.spawnParticle(
+                        Particle.BLOCK,
+                        target.getLocation(),
+                        100,
+                        2, 1, 2,
+                        Material.DEEPSLATE.createBlockData()
+                );
+
                 target.setVelocity(new Vector(0, 2, 0));
                 damage(target, 1000);
             }
 
             case BLACK_HOLE -> {
-                world.spawnParticle(Particle.PORTAL,
-                        target.getLocation(), 200, 2, 2, 2, 0.5);
+                world.spawnParticle(
+                        Particle.PORTAL,
+                        target.getLocation(),
+                        200,
+                        2, 2, 2,
+                        0.5
+                );
+
                 target.setVelocity(new Vector(0, 2, 0));
                 damage(target, 1000);
             }
 
             case SOUL_DRAIN -> {
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.WITHER, 200, 10
+                        PotionEffectType.WITHER,
+                        200,
+                        10
                 ));
+
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.DARKNESS, 200, 1
+                        PotionEffectType.DARKNESS,
+                        200,
+                        1
                 ));
+
                 damage(target, 1000);
             }
 
             case BLOOD_MOON -> {
                 world.setTime(18000);
-                world.spawnParticle(Particle.DAMAGE_INDICATOR,
-                        target.getLocation(), 100, 1, 1, 1);
+
+                world.spawnParticle(
+                        Particle.DAMAGE_INDICATOR,
+                        target.getLocation(),
+                        100,
+                        1, 1, 1
+                );
+
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.WEAKNESS, 200, 5
+                        PotionEffectType.WEAKNESS,
+                        200,
+                        5
                 ));
+
                 damage(target, 1000);
             }
 
             case BLINDNESS -> {
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.BLINDNESS, 200, 1
+                        PotionEffectType.BLINDNESS,
+                        200,
+                        1
                 ));
+
                 target.addPotionEffect(new PotionEffect(
-                        PotionEffectType.DARKNESS, 200, 1
+                        PotionEffectType.DARKNESS,
+                        200,
+                        1
                 ));
+
                 damage(target, 1000);
             }
 
@@ -835,7 +1068,16 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
 
     private void executeDeathBot(Player executor, Player victim) {
         if (!getConfig().getBoolean("deathbot.enabled", true)) {
-            executor.sendMessage("§cDeathBot is disabled in the configuration.");
+            executor.sendMessage(
+                    "§cDeathBot is disabled in the configuration."
+            );
+            return;
+        }
+
+        if (Bukkit.getPluginManager().getPlugin("PvpBot") == null) {
+            executor.sendMessage(
+                    "§cPvpBot is not installed. DeathBot cannot run."
+            );
             return;
         }
 
@@ -849,9 +1091,17 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
                 "pvpbot kit give long Death"
         );
 
-        spawnCommand = spawnCommand.replace("%player%", victim.getName());
+        if (spawnCommand == null || kitCommand == null) {
+            executor.sendMessage("§cDeathBot commands are not configured.");
+            return;
+        }
 
-        Bukkit.dispatchCommand(
+        spawnCommand = spawnCommand.replace(
+                "%player%",
+                victim.getName()
+        );
+
+        boolean spawned = Bukkit.dispatchCommand(
                 Bukkit.getConsoleSender(),
                 spawnCommand
         );
@@ -861,9 +1111,15 @@ public final class DeathNotePlugin extends JavaPlugin implements Listener, Comma
                 kitCommand
         );
 
-        Bukkit.broadcastMessage("§4§lDEATH NOTE §8» §cDeath has arrived for "
-                + victim.getName() + "§7.");
+        Bukkit.broadcastMessage(
+                "§4§lDEATH NOTE §8» §cDeath has arrived for " +
+                victim.getName() + "§7."
+        );
 
-        executor.sendMessage("§aDeathBot commands dispatched.");
+        executor.sendMessage(
+                spawned
+                        ? "§aDeathBot commands dispatched."
+                        : "§eDeathBot spawn command was dispatched; check PvpBot syntax."
+        );
     }
 }
