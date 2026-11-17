@@ -18,6 +18,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -33,19 +34,40 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         implements Listener {
 
     private NamespacedKey bookKey;
 
-    private final Map<UUID, DeathMethod> awaitingVictim = new HashMap<>();
+    private final Map<UUID, DeathMethod> awaitingVictim =
+            new ConcurrentHashMap<>();
+
     private final Map<UUID, Arena> arenas = new HashMap<>();
+
+    private final Map<UUID, BukkitTask> deathBotTasks = new HashMap<>();
+
     private final Set<BlockKey> protectedBlocks = new HashSet<>();
+
     private final Map<UUID, List<String>> history = new HashMap<>();
+
+    private static final int METHODS_PER_PAGE = 36;
+    private static final int ARENA_RADIUS = 30;
 
     private enum DeathMethod {
         RANDOM,
@@ -89,9 +111,8 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         DEATHBOT
     }
 
-    private static final int METHODS_PER_PAGE = 36;
-
     private static class DeathMenu implements InventoryHolder {
+
         private final int page;
         private Inventory inventory;
 
@@ -106,6 +127,7 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
     }
 
     private record BlockKey(UUID world, int x, int y, int z) {
+
         static BlockKey of(Block block) {
             return new BlockKey(
                     block.getWorld().getUID(),
@@ -117,9 +139,12 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
     }
 
     private static class Arena {
+
         final UUID victim;
+
         final Map<BlockKey, BlockState> originalBlocks =
                 new LinkedHashMap<>();
+
         BukkitTask timeout;
 
         Arena(UUID victim) {
@@ -127,27 +152,45 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         }
     }
 
+    // ==================================================
+    // ENABLE / DISABLE
+    // ==================================================
+
     @Override
     public void onEnable() {
         bookKey = new NamespacedKey(this, "death_note");
+
         Bukkit.getPluginManager().registerEvents(this, this);
+
         getLogger().info("DeathNote enabled.");
     }
 
     @Override
     public void onDisable() {
+
+        for (BukkitTask task : new ArrayList<>(deathBotTasks.values())) {
+            if (task != null) {
+                task.cancel();
+            }
+        }
+
+        deathBotTasks.clear();
+
         for (Arena arena : new ArrayList<>(arenas.values())) {
             restoreArena(arena);
         }
+
         getLogger().info("DeathNote disabled.");
     }
 
-    // --------------------------------------------------
+    // ==================================================
     // DEATH NOTE ITEM
-    // --------------------------------------------------
+    // ==================================================
 
     private ItemStack createDeathNote() {
+
         ItemStack item = new ItemStack(Material.WRITTEN_BOOK);
+
         ItemMeta meta = item.getItemMeta();
 
         meta.setDisplayName(ChatColor.DARK_RED + "Death Note");
@@ -159,8 +202,10 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         );
 
         if (meta instanceof org.bukkit.inventory.meta.BookMeta bookMeta) {
+
             bookMeta.setTitle("Death Note");
             bookMeta.setAuthor("Death");
+
             bookMeta.setPages(
                     ChatColor.DARK_RED + "DEATH NOTE\n\n" +
                     ChatColor.BLACK +
@@ -170,10 +215,12 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         }
 
         item.setItemMeta(meta);
+
         return item;
     }
 
     private boolean isDeathNote(ItemStack item) {
+
         if (item == null || !item.hasItemMeta()) {
             return false;
         }
@@ -187,6 +234,7 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
 
     @EventHandler
     public void onRightClick(PlayerInteractEvent event) {
+
         if (event.getHand() != EquipmentSlot.HAND) {
             return;
         }
@@ -201,14 +249,16 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         }
 
         event.setCancelled(true);
+
         event.getPlayer().openInventory(createMenu(0));
     }
 
-    // --------------------------------------------------
+    // ==================================================
     // GUI
-    // --------------------------------------------------
+    // ==================================================
 
     private Inventory createMenu(int page) {
+
         DeathMenu holder = new DeathMenu(page);
 
         Inventory inventory = Bukkit.createInventory(
@@ -225,10 +275,13 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         int end = Math.min(start + METHODS_PER_PAGE, methods.length);
 
         for (int i = start; i < end; i++) {
+
             DeathMethod method = methods[i];
+
             int slot = 9 + (i - start);
 
             ItemStack item = new ItemStack(getMethodIcon(method));
+
             ItemMeta meta = item.getItemMeta();
 
             meta.setDisplayName(
@@ -241,70 +294,114 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             ));
 
             item.setItemMeta(meta);
+
             inventory.setItem(slot, item);
         }
 
         if (page > 0) {
+
             ItemStack previous = new ItemStack(Material.ARROW);
+
             ItemMeta meta = previous.getItemMeta();
+
             meta.setDisplayName(ChatColor.YELLOW + "Previous page");
+
             previous.setItemMeta(meta);
+
             inventory.setItem(45, previous);
         }
 
         if (end < methods.length) {
+
             ItemStack next = new ItemStack(Material.ARROW);
+
             ItemMeta meta = next.getItemMeta();
+
             meta.setDisplayName(ChatColor.YELLOW + "Next page");
+
             next.setItemMeta(meta);
+
             inventory.setItem(53, next);
         }
 
         ItemStack info = new ItemStack(Material.BOOK);
+
         ItemMeta infoMeta = info.getItemMeta();
 
         infoMeta.setDisplayName(ChatColor.GOLD + "Death Note");
+
         infoMeta.setLore(List.of(
                 ChatColor.GRAY + "Choose a death method.",
                 ChatColor.GRAY + "Then type the victim's username in chat."
         ));
 
         info.setItemMeta(infoMeta);
+
         inventory.setItem(4, info);
 
         return inventory;
     }
 
     private Material getMethodIcon(DeathMethod method) {
+
         return switch (method) {
+
             case RANDOM -> Material.NETHER_STAR;
+
             case LIGHTNING, DIVINE -> Material.LIGHTNING_ROD;
+
             case FALL, METEOR, ANVIL, RANDOM_TRAP -> Material.ANVIL;
+
             case DROWN -> Material.WATER_BUCKET;
+
             case SUFFOCATE -> Material.STONE;
+
             case LAVA, FIRESTORM, SOUL_FIRE -> Material.LAVA_BUCKET;
+
             case STARVE -> Material.ROTTEN_FLESH;
+
             case FREEZE -> Material.POWDER_SNOW_BUCKET;
+
             case VOID, BLACK_HOLE -> Material.ENDER_PEARL;
+
             case CACTUS -> Material.CACTUS;
+
             case HEART, BLOOD_MOON -> Material.REDSTONE;
+
             case CREEPER -> Material.CREEPER_HEAD;
+
             case POISON -> Material.SPIDER_EYE;
+
             case ELYTRA -> Material.ELYTRA;
+
             case TRIDENT, RIPTIDE -> Material.TRIDENT;
+
             case PHANTOM -> Material.PHANTOM_MEMBRANE;
+
             case WARDEN, SOUL_DRAIN -> Material.SCULK;
+
             case TNT_MINECART -> Material.TNT_MINECART;
+
             case CRYSTAL -> Material.END_CRYSTAL;
+
             case ENDERMAN -> Material.ENDER_PEARL;
+
             case RAVAGER -> Material.RAVAGER_SPAWN_EGG;
+
             case GOLEM -> Material.IRON_BLOCK;
+
             case WITHER -> Material.WITHER_SKELETON_SKULL;
+
             case GHAST -> Material.GHAST_TEAR;
+
             case VEX -> Material.ALLAY_SPAWN_EGG;
+
             case SILVERFISH -> Material.INFESTED_STONE;
+
             case EARTHQUAKE -> Material.DEEPSLATE;
+
             case BLINDNESS -> Material.BLACK_DYE;
+
             case DEATHBOT -> Material.IRON_SWORD;
         };
     }
@@ -315,6 +412,7 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
 
     @EventHandler
     public void onMenuClick(InventoryClickEvent event) {
+
         if (!(event.getInventory().getHolder() instanceof DeathMenu menu)) {
             return;
         }
@@ -337,12 +435,14 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         }
 
         if (slot == 53) {
+
             int maxPage =
                     (DeathMethod.values().length - 1) / METHODS_PER_PAGE;
 
             if (menu.page < maxPage) {
                 player.openInventory(createMenu(menu.page + 1));
             }
+
             return;
         }
 
@@ -359,6 +459,7 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         DeathMethod method = DeathMethod.values()[index];
 
         awaitingVictim.put(player.getUniqueId(), method);
+
         player.closeInventory();
 
         player.sendMessage(
@@ -373,12 +474,13 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         );
     }
 
-    // --------------------------------------------------
+    // ==================================================
     // CHAT INPUT
-    // --------------------------------------------------
+    // ==================================================
 
     @EventHandler
     public void onChat(AsyncPlayerChatEvent event) {
+
         Player player = event.getPlayer();
 
         DeathMethod method = awaitingVictim.get(player.getUniqueId());
@@ -388,9 +490,16 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         }
 
         String victimName = event.getMessage().trim();
+
         event.setCancelled(true);
 
         Bukkit.getScheduler().runTask(this, () -> {
+
+            if (!player.isOnline()) {
+                awaitingVictim.remove(player.getUniqueId());
+                return;
+            }
+
             if (!awaitingVictim.containsKey(player.getUniqueId())) {
                 return;
             }
@@ -400,17 +509,21 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             Player victim = Bukkit.getPlayerExact(victimName);
 
             if (victim == null) {
+
                 player.sendMessage(
                         ChatColor.RED + "That player is not online."
                 );
+
                 return;
             }
 
             if (victim.equals(player)) {
+
                 player.sendMessage(
                         ChatColor.RED +
                         "You cannot use the Death Note on yourself."
                 );
+
                 return;
             }
 
@@ -418,16 +531,18 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         });
     }
 
-    // --------------------------------------------------
+    // ==================================================
     // EXECUTION
-    // --------------------------------------------------
+    // ==================================================
 
     private void executeDeath(
             Player executor,
             Player victim,
             DeathMethod method
     ) {
+
         if (method == DeathMethod.RANDOM) {
+
             DeathMethod[] values = Arrays.stream(DeathMethod.values())
                     .filter(m -> m != DeathMethod.RANDOM)
                     .toArray(DeathMethod[]::new);
@@ -460,63 +575,104 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         performDeath(victim, method);
     }
 
-    // --------------------------------------------------
+    // ==================================================
     // DEATHBOT
-    // --------------------------------------------------
+    // ==================================================
 
     private void executeDeathBot(Player victim) {
+
         createArena(victim);
 
+        // Spawn the PvpBot.
         Bukkit.dispatchCommand(
                 Bukkit.getConsoleSender(),
                 "pvpbot spawn Death"
         );
 
+        // Give Death the long kit after spawning.
         Bukkit.getScheduler().runTaskLater(this, () -> {
+
             Bukkit.dispatchCommand(
                     Bukkit.getConsoleSender(),
                     "pvpbot kit give long Death"
             );
+
         }, 20L);
 
-        Bukkit.getScheduler().runTaskLater(this, () -> {
-            if (!victim.isOnline()) {
-                return;
-            }
+        // Remove an older retry task for this victim.
+        BukkitTask oldTask = deathBotTasks.remove(victim.getUniqueId());
 
-            // Teleport Death to the victim using the server command.
-            Bukkit.dispatchCommand(
-                    Bukkit.getConsoleSender(),
-                    "tp Death " + victim.getName()
-            );
+        if (oldTask != null) {
+            oldTask.cancel();
+        }
 
-            // If Death is also registered as a Bukkit Player,
-            // move it two blocks behind the victim.
-            Player deathPlayer = Bukkit.getPlayerExact("Death");
+        // Keep attempting to teleport Death to the victim.
+        // This gives the bot time to finish spawning.
+        BukkitRunnable teleportRunnable = new BukkitRunnable() {
 
-            if (deathPlayer != null) {
-                Location behind = victim.getLocation().clone();
-                behind.add(
-                        victim.getLocation().getDirection().multiply(-2)
+            private int attempts = 0;
+
+            @Override
+            public void run() {
+
+                if (!victim.isOnline() || attempts >= 10) {
+
+                    deathBotTasks.remove(victim.getUniqueId());
+
+                    cancel();
+
+                    return;
+                }
+
+                Bukkit.dispatchCommand(
+                        Bukkit.getConsoleSender(),
+                        "tp Death " + victim.getName()
                 );
-                deathPlayer.teleport(behind);
-            }
 
-            victim.sendMessage(
-                    ChatColor.DARK_RED +
-                    "Death has arrived. Survive."
-            );
-        }, 40L);
+                attempts++;
+
+                if (attempts >= 10) {
+
+                    deathBotTasks.remove(victim.getUniqueId());
+
+                    cancel();
+                }
+            }
+        };
+
+        BukkitTask task = teleportRunnable.runTaskTimer(
+                this,
+                40L,
+                20L
+        );
+
+        deathBotTasks.put(victim.getUniqueId(), task);
+
+        victim.sendMessage(
+                ChatColor.DARK_RED +
+                "Death has been summoned. Survive."
+        );
     }
 
-    // --------------------------------------------------
-    // DEATH ARENA
-    // --------------------------------------------------
+    private void stopDeathBotTask(UUID victim) {
+
+        BukkitTask task = deathBotTasks.remove(victim);
+
+        if (task != null) {
+            task.cancel();
+        }
+    }
+
+    // ==================================================
+    // FULL DEATH SPHERE
+    // ==================================================
 
     private void createArena(Player victim) {
+
         restoreArenaForVictim(victim.getUniqueId());
 
         Location center = victim.getLocation().getBlock().getLocation();
+
         World world = center.getWorld();
 
         if (world == null) {
@@ -525,7 +681,8 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
 
         Arena arena = new Arena(victim.getUniqueId());
 
-        int radius = 30;
+        int radius = ARENA_RADIUS;
+
         int centerX = center.getBlockX();
         int centerY = center.getBlockY();
         int centerZ = center.getBlockZ();
@@ -533,15 +690,25 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
         int minY = world.getMinHeight();
         int maxY = world.getMaxHeight() - 1;
 
-        for (int x = -radius; x <= radius; x++) {
-            for (int z = -radius; z <= radius; z++) {
-                for (int y = 0; y <= radius; y++) {
-                    double distance = Math.sqrt(
-                            x * x + y * y + z * z
-                    );
+        int radiusSquared = radius * radius;
+        int innerRadiusSquared = (radius - 1) * (radius - 1);
 
-                    if (distance < radius - 1.0 ||
-                            distance > radius) {
+        // All three axes go from -30 to +30.
+        // This creates the TOP, BOTTOM, LEFT, RIGHT,
+        // FRONT and BACK of the sphere.
+        for (int x = -radius; x <= radius; x++) {
+
+            for (int y = -radius; y <= radius; y++) {
+
+                for (int z = -radius; z <= radius; z++) {
+
+                    int distanceSquared =
+                            x * x + y * y + z * z;
+
+                    // Only create the outer shell.
+                    // The inside remains hollow.
+                    if (distanceSquared > radiusSquared ||
+                            distanceSquared < innerRadiusSquared) {
                         continue;
                     }
 
@@ -563,9 +730,11 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
                         continue;
                     }
 
+                    // Save the original block before replacing it.
                     arena.originalBlocks.put(key, block.getState());
 
                     block.setType(Material.BLACK_CONCRETE, false);
+
                     protectedBlocks.add(key);
                 }
             }
@@ -573,6 +742,7 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
 
         arenas.put(victim.getUniqueId(), arena);
 
+        // Automatically restore after 10 minutes.
         arena.timeout = Bukkit.getScheduler().runTaskLater(
                 this,
                 () -> restoreArena(arena),
@@ -581,19 +751,29 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
 
         victim.sendMessage(
                 ChatColor.DARK_GRAY +
-                "A black concrete Death Domain has surrounded you."
+                "A FULL BLACK CONCRETE DEATH SPHERE has surrounded you."
         );
     }
 
-    private void restoreArenaForVictim(UUID victim) {
-        Arena old = arenas.get(victim);
+    // ==================================================
+    // ARENA RESTORATION
+    // ==================================================
 
-        if (old != null) {
-            restoreArena(old);
+    private void restoreArenaForVictim(UUID victim) {
+
+        Arena arena = arenas.get(victim);
+
+        if (arena != null) {
+            restoreArena(arena);
         }
     }
 
     private void restoreArena(Arena arena) {
+
+        if (arena == null) {
+            return;
+        }
+
         if (arena.timeout != null) {
             arena.timeout.cancel();
         }
@@ -602,6 +782,7 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
                 arena.originalBlocks.entrySet()) {
 
             BlockKey key = entry.getKey();
+
             protectedBlocks.remove(key);
 
             World world = Bukkit.getWorld(key.world());
@@ -610,6 +791,7 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
                 continue;
             }
 
+            // Restore the exact original block state.
             entry.getValue().update(true, false);
         }
 
@@ -618,16 +800,33 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
 
     @EventHandler
     public void onVictimDeath(PlayerDeathEvent event) {
-        restoreArenaForVictim(event.getEntity().getUniqueId());
+
+        UUID victim = event.getEntity().getUniqueId();
+
+        stopDeathBotTask(victim);
+
+        restoreArenaForVictim(victim);
     }
 
     @EventHandler
     public void onVictimQuit(PlayerQuitEvent event) {
-        restoreArenaForVictim(event.getPlayer().getUniqueId());
+
+        UUID victim = event.getPlayer().getUniqueId();
+
+        awaitingVictim.remove(victim);
+
+        stopDeathBotTask(victim);
+
+        restoreArenaForVictim(victim);
     }
+
+    // ==================================================
+    // ARENA PROTECTION
+    // ==================================================
 
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
+
         if (protectedBlocks.contains(BlockKey.of(event.getBlock()))) {
             event.setCancelled(true);
         }
@@ -635,40 +834,59 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
 
     @EventHandler
     public void onBlockPlace(BlockPlaceEvent event) {
+
         if (protectedBlocks.contains(BlockKey.of(event.getBlock()))) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler
-    public void onExplosion(EntityExplodeEvent event) {
+    public void onEntityExplosion(EntityExplodeEvent event) {
+
         event.blockList().removeIf(
                 block -> protectedBlocks.contains(BlockKey.of(block))
         );
     }
 
-    // --------------------------------------------------
+    @EventHandler
+    public void onBlockExplosion(BlockExplodeEvent event) {
+
+        event.blockList().removeIf(
+                block -> protectedBlocks.contains(BlockKey.of(block))
+        );
+    }
+
+    // ==================================================
     // DEATH METHODS
-    // --------------------------------------------------
+    // ==================================================
 
     private void performDeath(Player target, DeathMethod method) {
+
         Location location = target.getLocation();
+
         World world = target.getWorld();
 
         switch (method) {
+
             case LIGHTNING, DIVINE -> {
+
                 world.strikeLightningEffect(location);
+
                 kill(target);
             }
 
             case FALL, METEOR -> {
+
                 world.spawnParticle(
                         Particle.EXPLOSION,
                         location,
                         20
                 );
 
-                target.setVelocity(target.getVelocity().setY(2.5));
+                target.setVelocity(
+                        target.getVelocity().setY(2.5)
+                );
+
                 Bukkit.getScheduler().runTaskLater(
                         this,
                         () -> kill(target),
@@ -677,88 +895,142 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             }
 
             case DROWN -> {
+
                 target.addPotionEffect(new PotionEffect(
                         PotionEffectType.WATER_BREATHING,
                         1,
                         0
                 ));
+
                 target.damage(1000);
             }
 
             case SUFFOCATE -> {
+
                 target.addPotionEffect(new PotionEffect(
                         PotionEffectType.SLOWNESS,
                         100,
                         10
                 ));
+
                 kill(target);
             }
 
             case LAVA, FIRESTORM -> {
+
                 target.setFireTicks(100);
-                world.spawnParticle(Particle.FLAME, location, 80);
+
+                world.spawnParticle(
+                        Particle.FLAME,
+                        location,
+                        80
+                );
+
                 kill(target);
             }
 
             case STARVE -> {
+
                 target.setFoodLevel(0);
+
                 target.setSaturation(0);
+
                 kill(target);
             }
 
             case FREEZE -> {
+
                 target.setFreezeTicks(400);
-                world.spawnParticle(Particle.SNOWFLAKE, location, 60);
+
+                world.spawnParticle(
+                        Particle.SNOWFLAKE,
+                        location,
+                        60
+                );
+
                 kill(target);
             }
 
             case VOID, BLACK_HOLE -> {
-                target.setVelocity(target.getVelocity().setY(-5));
-                world.spawnParticle(Particle.PORTAL, location, 100);
+
+                target.setVelocity(
+                        target.getVelocity().setY(-5)
+                );
+
+                world.spawnParticle(
+                        Particle.PORTAL,
+                        location,
+                        100
+                );
+
                 kill(target);
             }
 
             case CACTUS -> {
-                world.spawnParticle(Particle.CRIT, location, 50);
+
+                world.spawnParticle(
+                        Particle.CRIT,
+                        location,
+                        50
+                );
+
                 target.damage(1000);
             }
 
             case ANVIL, RANDOM_TRAP -> {
+
                 world.spawnParticle(
                         Particle.BLOCK,
                         location,
                         60,
                         Material.ANVIL.createBlockData()
                 );
+
                 kill(target);
             }
 
             case HEART, BLOOD_MOON -> {
+
                 world.spawnParticle(
                         Particle.DAMAGE_INDICATOR,
                         location,
                         50
                 );
+
                 target.damage(1000);
             }
 
             case CREEPER -> {
+
                 world.spawnEntity(location, EntityType.CREEPER);
-                world.createExplosion(location, 4.0f, false, false);
+
+                world.createExplosion(
+                        location,
+                        4.0f,
+                        false,
+                        false
+                );
+
                 kill(target);
             }
 
             case POISON -> {
+
                 target.addPotionEffect(new PotionEffect(
                         PotionEffectType.POISON,
                         200,
                         10
                 ));
+
                 kill(target);
             }
 
             case ELYTRA -> {
-                target.setVelocity(target.getVelocity().setY(5));
+
+                target.setVelocity(
+                        target.getVelocity().setY(5)
+                );
+
                 Bukkit.getScheduler().runTaskLater(
                         this,
                         () -> kill(target),
@@ -767,103 +1039,163 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             }
 
             case TRIDENT, RIPTIDE -> {
-                world.spawnParticle(Particle.SPLASH, location, 80);
+
+                world.spawnParticle(
+                        Particle.SPLASH,
+                        location,
+                        80
+                );
+
                 target.damage(1000);
             }
 
             case PHANTOM -> {
+
                 world.spawnEntity(location, EntityType.PHANTOM);
+
                 kill(target);
             }
 
             case WARDEN -> {
+
                 world.spawnEntity(location, EntityType.WARDEN);
+
                 kill(target);
             }
 
             case TNT_MINECART -> {
-                world.createExplosion(location, 5.0f, false, false);
+
+                world.createExplosion(
+                        location,
+                        5.0f,
+                        false,
+                        false
+                );
+
                 kill(target);
             }
 
             case CRYSTAL -> {
-                world.spawnParticle(Particle.EXPLOSION, location, 100);
-                world.createExplosion(location, 6.0f, false, false);
+
+                world.spawnParticle(
+                        Particle.EXPLOSION,
+                        location,
+                        100
+                );
+
+                world.createExplosion(
+                        location,
+                        6.0f,
+                        false,
+                        false
+                );
+
                 kill(target);
             }
 
             case ENDERMAN -> {
+
                 world.spawnEntity(location, EntityType.ENDERMAN);
+
                 kill(target);
             }
 
             case RAVAGER -> {
+
                 world.spawnEntity(location, EntityType.RAVAGER);
+
                 kill(target);
             }
 
             case GOLEM -> {
+
                 world.spawnEntity(location, EntityType.IRON_GOLEM);
+
                 kill(target);
             }
 
             case WITHER -> {
+
                 world.spawnEntity(location, EntityType.WITHER);
+
                 kill(target);
             }
 
             case GHAST -> {
+
                 world.spawnEntity(location, EntityType.GHAST);
+
                 kill(target);
             }
 
             case VEX -> {
+
                 world.spawnEntity(location, EntityType.VEX);
+
                 kill(target);
             }
 
             case SILVERFISH -> {
+
                 world.spawnEntity(location, EntityType.SILVERFISH);
+
                 kill(target);
             }
 
             case EARTHQUAKE -> {
+
                 world.spawnParticle(
                         Particle.BLOCK,
                         location,
                         100,
                         Material.DEEPSLATE.createBlockData()
                 );
-                target.setVelocity(target.getVelocity().setY(2));
+
+                target.setVelocity(
+                        target.getVelocity().setY(2)
+                );
+
                 kill(target);
             }
 
             case SOUL_DRAIN -> {
-                world.spawnParticle(Particle.SOUL, location, 100);
+
+                world.spawnParticle(
+                        Particle.SOUL,
+                        location,
+                        100
+                );
+
                 target.addPotionEffect(new PotionEffect(
                         PotionEffectType.WITHER,
                         200,
                         5
                 ));
+
                 kill(target);
             }
 
             case SOUL_FIRE -> {
+
                 world.spawnParticle(
                         Particle.SOUL_FIRE_FLAME,
                         location,
                         100
                 );
+
                 target.setFireTicks(200);
+
                 kill(target);
             }
 
             case BLINDNESS -> {
+
                 target.addPotionEffect(new PotionEffect(
                         PotionEffectType.BLINDNESS,
                         200,
                         1
                 ));
+
                 kill(target);
             }
 
@@ -872,14 +1204,15 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
     }
 
     private void kill(Player target) {
+
         if (target.isOnline() && !target.isDead()) {
             target.setHealth(0);
         }
     }
 
-    // --------------------------------------------------
+    // ==================================================
     // COMMANDS
-    // --------------------------------------------------
+    // ==================================================
 
     @Override
     public boolean onCommand(
@@ -888,47 +1221,71 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             String label,
             String[] args
     ) {
+
         if (!command.getName().equalsIgnoreCase("deathnote")) {
             return false;
         }
 
         if (!sender.hasPermission("deathnote.admin")) {
-            sender.sendMessage(ChatColor.RED + "No permission.");
+
+            sender.sendMessage(
+                    ChatColor.RED + "No permission."
+            );
+
             return true;
         }
 
         if (args.length == 0) {
-            sender.sendMessage(ChatColor.RED +
-                    "/deathnote give <player>");
-            sender.sendMessage(ChatColor.RED +
-                    "/deathnote execute <victim> <method>");
-            sender.sendMessage(ChatColor.RED +
-                    "/deathnote methods");
-            sender.sendMessage(ChatColor.RED +
-                    "/deathnote history <player>");
-            sender.sendMessage(ChatColor.RED +
-                    "/deathnote cancel <player>");
-            sender.sendMessage(ChatColor.RED +
-                    "/deathnote reload");
+
+            sender.sendMessage(
+                    ChatColor.RED + "/deathnote give <player>"
+            );
+
+            sender.sendMessage(
+                    ChatColor.RED + "/deathnote execute <victim> <method>"
+            );
+
+            sender.sendMessage(
+                    ChatColor.RED + "/deathnote methods"
+            );
+
+            sender.sendMessage(
+                    ChatColor.RED + "/deathnote history <player>"
+            );
+
+            sender.sendMessage(
+                    ChatColor.RED + "/deathnote cancel <player>"
+            );
+
+            sender.sendMessage(
+                    ChatColor.RED + "/deathnote reload"
+            );
+
             return true;
         }
 
         switch (args[0].toLowerCase(Locale.ROOT)) {
+
             case "give" -> {
+
                 if (args.length < 2) {
+
                     sender.sendMessage(
                             ChatColor.RED +
                             "Usage: /deathnote give <player>"
                     );
+
                     return true;
                 }
 
                 Player player = Bukkit.getPlayerExact(args[1]);
 
                 if (player == null) {
+
                     sender.sendMessage(
                             ChatColor.RED + "Player not found."
                     );
+
                     return true;
                 }
 
@@ -941,11 +1298,13 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             }
 
             case "methods" -> {
+
                 sender.sendMessage(
                         ChatColor.DARK_RED + "Death Note methods:"
                 );
 
                 for (DeathMethod method : DeathMethod.values()) {
+
                     sender.sendMessage(
                             ChatColor.GRAY + "- " + formatMethod(method)
                     );
@@ -953,34 +1312,43 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             }
 
             case "execute" -> {
+
                 if (args.length < 3) {
+
                     sender.sendMessage(
                             ChatColor.RED +
                             "Usage: /deathnote execute <victim> <method>"
                     );
+
                     return true;
                 }
 
                 Player victim = Bukkit.getPlayerExact(args[1]);
 
                 if (victim == null) {
+
                     sender.sendMessage(
                             ChatColor.RED + "Victim is not online."
                     );
+
                     return true;
                 }
 
                 DeathMethod method;
 
                 try {
+
                     method = DeathMethod.valueOf(
                             args[2].toUpperCase(Locale.ROOT)
                                     .replace(' ', '_')
                     );
+
                 } catch (IllegalArgumentException exception) {
+
                     sender.sendMessage(
                             ChatColor.RED + "Unknown death method."
                     );
+
                     return true;
                 }
 
@@ -991,20 +1359,25 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             }
 
             case "history" -> {
+
                 if (args.length < 2) {
+
                     sender.sendMessage(
                             ChatColor.RED +
                             "Usage: /deathnote history <player>"
                     );
+
                     return true;
                 }
 
                 Player player = Bukkit.getPlayerExact(args[1]);
 
                 if (player == null) {
+
                     sender.sendMessage(
                             ChatColor.RED + "Player must be online."
                     );
+
                     return true;
                 }
 
@@ -1017,11 +1390,15 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
                 );
 
                 if (entries == null || entries.isEmpty()) {
+
                     sender.sendMessage(
                             ChatColor.GRAY + "No history."
                     );
+
                 } else {
+
                     for (String entry : entries) {
+
                         sender.sendMessage(
                                 ChatColor.GRAY + "- " + entry
                         );
@@ -1030,25 +1407,35 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             }
 
             case "cancel" -> {
+
                 if (args.length < 2) {
+
                     sender.sendMessage(
                             ChatColor.RED +
                             "Usage: /deathnote cancel <player>"
                     );
+
                     return true;
                 }
 
                 Player player = Bukkit.getPlayerExact(args[1]);
 
                 if (player == null) {
+
                     sender.sendMessage(
                             ChatColor.RED + "Player not found."
                     );
+
                     return true;
                 }
 
-                awaitingVictim.remove(player.getUniqueId());
-                restoreArenaForVictim(player.getUniqueId());
+                UUID playerId = player.getUniqueId();
+
+                awaitingVictim.remove(playerId);
+
+                stopDeathBotTask(playerId);
+
+                restoreArenaForVictim(playerId);
 
                 sender.sendMessage(
                         ChatColor.GREEN +
@@ -1058,7 +1445,9 @@ public final class DeathNotePlugin extends org.bukkit.plugin.java.JavaPlugin
             }
 
             case "reload" -> {
+
                 reloadConfig();
+
                 sender.sendMessage(
                         ChatColor.GREEN + "DeathNote reloaded."
                 );
